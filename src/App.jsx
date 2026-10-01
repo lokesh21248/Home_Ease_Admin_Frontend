@@ -16,6 +16,7 @@ import {
   getPayments,
   getLiveMap,
   getBookings,
+  getNotifications,
   checkServerHealth
 } from './api/adminApi';
 
@@ -119,21 +120,7 @@ export default function App() {
     localStorage.removeItem('homeease_admin_coupons');
     return [];
   });
-  const [notifications, setNotifications] = useState(() => {
-    const cached = localStorage.getItem('homeease_admin_notifications');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const userOnly = parsed.filter(n => !n.id?.startsWith('notif-00'));
-          localStorage.setItem('homeease_admin_notifications', JSON.stringify(userOnly));
-          return userOnly;
-        }
-      } catch (e) {}
-    }
-    localStorage.setItem('homeease_admin_notifications', JSON.stringify([]));
-    return [];
-  });
+  const [notifications, setNotifications] = useState([]);
   const [securitySettings, setSecuritySettings] = useState(DEFAULT_SECURITY_SETTINGS);
   const [auditLogs, setAuditLogs] = useState([]);
 
@@ -240,6 +227,30 @@ export default function App() {
         }
       } catch (err) {
         console.warn('Coupons fetch error:', err.message);
+      }
+
+      // 10. Live Push Notifications & Broadcasts (Zero Dummy Data)
+      try {
+        const nList = await getNotifications();
+        if (Array.isArray(nList)) {
+          const liveNotifs = nList.map(n => ({
+            id: n.notificationId || n.id,
+            notificationId: n.notificationId || n.id,
+            title: n.title,
+            body: n.message || n.body,
+            message: n.message || n.body,
+            target: n.recipientName || 'All Users',
+            recipientName: n.recipientName || 'All Users',
+            status: n.status === 'SENT' ? 'Delivered' : (n.status === 'PENDING' ? 'Scheduled' : n.status),
+            sentTime: n.sentAt ? new Date(n.sentAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (n.createdAt ? new Date(n.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Just Now'),
+            iconType: n.type === 'REMINDER' ? 'alert' : 'promo',
+            type: n.type,
+            createdAt: n.createdAt
+          }));
+          setNotifications(liveNotifs);
+        }
+      } catch (err) {
+        console.warn('Notifications fetch error:', err.message);
       }
 
     } finally {
@@ -436,6 +447,7 @@ export default function App() {
             <Module12Notifications 
               notifications={notifications} 
               setNotifications={setNotifications}
+              onRefresh={syncAllLiveData}
             />
           )}
         </main>

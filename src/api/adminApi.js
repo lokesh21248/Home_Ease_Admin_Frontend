@@ -318,6 +318,10 @@ export const scheduleNotification = (notificationData) => {
   });
 };
 
+export const getNotifications = () => {
+  return request('/notifications');
+};
+
 // ==========================================
 // Module 11: Bookings & Orders Management
 // ==========================================

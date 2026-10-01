@@ -33,7 +33,7 @@ const QUICK_PRESETS = [
   }
 ];
 
-export const Module12Notifications = ({ notifications = [], setNotifications }) => {
+export const Module12Notifications = ({ notifications = [], setNotifications, onRefresh }) => {
   // Form State
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -396,7 +396,7 @@ export const Module12Notifications = ({ notifications = [], setNotifications }) 
               filteredNotifs.map((item) => {
                 const isScheduled = item.status === 'Scheduled' || item.type === 'SCHEDULED_CAMPAIGN';
                 const audience = item.target || item.recipientName || 'All Users';
-                const isMenuOpen = activeMenuId === item.id;
+                const isMenuOpen = activeMenuId === (item.id || item.notificationId);
 
                 // Color & Icon mapping matching screenshot
                 let avatarClass = "bg-emerald-50 text-emerald-600";
@@ -414,7 +414,7 @@ export const Module12Notifications = ({ notifications = [], setNotifications }) 
                 }
 
                 return (
-                  <div key={item.id} className="py-4 first:pt-2 last:pb-1 flex items-start gap-3.5 relative group">
+                  <div key={item.id || item.notificationId} className="py-4 first:pt-2 last:pb-1 flex items-start gap-3.5 relative group">
                     {/* Circle Avatar Icon */}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${avatarClass}`}>
                       <AvatarIcon className="w-4 h-4" />
@@ -459,7 +459,7 @@ export const Module12Notifications = ({ notifications = [], setNotifications }) 
                     {/* Actions Menu */}
                     <div className="relative shrink-0 pt-0.5">
                       <button
-                        onClick={() => setActiveMenuId(isMenuOpen ? null : item.id)}
+                        onClick={() => setActiveMenuId(isMenuOpen ? null : (item.id || item.notificationId))}
                         className="p-1 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
                         title="Actions"
                       >
