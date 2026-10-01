@@ -3,7 +3,19 @@
  * Base URL: http://3.107.161.126:8080 (AWS Live Cloud Server)
  */
 
-export const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8080/api/v1/admin';
+const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL || '';
+
+export const API_BASE_URL = (() => {
+  // If deployed on HTTPS (e.g. Vercel) and URL is insecure HTTP or not set, route through Vercel's proxy rewrite
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (!rawBaseUrl || rawBaseUrl.startsWith('http://')) {
+      return '/api/v1/admin';
+    }
+  }
+  // Otherwise use specified URL or live backend fallback
+  return rawBaseUrl || 'http://3.107.161.126:8080/api/v1/admin';
+})();
+
 export const API_ROOT_URL = API_BASE_URL.replace(/\/admin\/?$/, '');
 
 /**

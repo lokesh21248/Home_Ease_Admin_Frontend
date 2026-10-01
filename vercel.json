@@ -4,6 +4,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "http://3.107.161.126:8080/api/:path*"
+    },
+    {
+      "source": "/upload/:path*",
+      "destination": "http://3.107.161.126:8080/upload/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
