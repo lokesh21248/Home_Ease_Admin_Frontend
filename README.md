@@ -49,4 +49,70 @@ The **Home Ease Admin Portal** provides platform administrators, dispatchers, an
 1. Clone the repository:
    ```bash
    git clone https://github.com/lokesh21248/Home_Ease_Admin_Frontend.git
-   cd Home_Ease_Admin_Frontend
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Configure Environment Variables:
+   Create a `.env` file in the root directory:
+   ```env
+   VITE_API_BASE_URL=http://localhost:8080/api
+   ```
+
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+5. Build for production:
+   ```bash
+   npm run build
+   ```
+
+6. Preview production build:
+   ```bash
+   npm run preview
+   ```
+
+---
+
+## 📁 Project Structure
+
+```text
+Home-ease_Admin/
+├── public/              # Static assets
+├── src/
+│   ├── api/             # API clients & service endpoints
+│   ├── assets/          # Icons, illustrations, and images
+│   ├── components/      # Reusable UI components (Modals, Tables, Forms)
+│   ├── constants/       # App constants, status badges, config values
+│   ├── views/           # Admin modules & views
+│   │   ├── Module01Auth.jsx
+│   │   ├── Module02Dashboard.jsx
+│   │   ├── Module02Bookings.jsx
+│   │   ├── Module03KYC.jsx
+│   │   ├── Module04Workers.jsx
+│   │   ├── Module05Customers.jsx
+│   │   ├── Module06Dispatch.jsx
+│   │   ├── Module07Categories.jsx
+│   │   ├── Module08SubServices.jsx
+│   │   ├── Module09Financials.jsx
+│   │   ├── Module10Banners.jsx
+│   │   ├── Module11Promotions.jsx
+│   │   ├── Module12Notifications.jsx
+│   │   ├── Module13Settings.jsx
+│   │   └── ModuleAnalytics.jsx
+│   ├── App.jsx          # Main application layout & navigation
+│   └── main.jsx         # App entry point
+├── package.json
+└── vite.config.js
+```
+
+---
+
+## 📄 License
+
+This project is proprietary and intended for internal administrative use of the Home Ease platform.
