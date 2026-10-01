@@ -234,18 +234,15 @@ export const unblockWorker = (workerId) => {
 };
 
 // ==========================================
-// Module 5: Customer & User Management
+// Module 5: Customer & User Management (Read-Only)
 // ==========================================
 export const getUsers = (role) => {
   const query = role ? `?role=${encodeURIComponent(role)}` : '';
   return request(`/users${query}`);
 };
 
-export const updateUserRole = (userId, role) => {
-  return request(`/users/${userId}/role`, {
-    method: 'PATCH',
-    body: JSON.stringify({ role }),
-  });
+export const getUserById = (userId) => {
+  return request(`/users/${userId}`);
 };
 
 // ==========================================
