@@ -121,7 +121,7 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
       {/* ========================================================================= */}
       {/* LEFT PANEL: Hero & Microservices Architecture (Dark Futuristic Navy)      */}
       {/* ========================================================================= */}
-      <div className="relative w-full lg:w-1/2 bg-gradient-to-br from-[#020713] via-[#051126] to-[#081B3B] p-8 sm:p-12 lg:p-16 flex flex-col justify-between overflow-hidden border-b lg:border-b-0 lg:border-r border-slate-800/80">
+      <div className="hidden lg:flex relative w-full lg:w-1/2 bg-gradient-to-br from-[#020713] via-[#051126] to-[#081B3B] p-8 sm:p-12 lg:p-16 flex-col justify-between overflow-hidden border-b lg:border-b-0 lg:border-r border-slate-800/80">
         
         {/* Subtle Background Radial Tech Glow */}
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -283,7 +283,7 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
       {/* ========================================================================= */}
       {/* RIGHT PANEL: Operations Portal Sign-In (Clean Crisp White)                */}
       {/* ========================================================================= */}
-      <div className="w-full lg:w-1/2 bg-white flex flex-col justify-center items-center p-8 sm:p-12 lg:p-16 relative">
+      <div className="w-full lg:w-1/2 min-h-screen bg-white flex flex-col justify-center items-center p-6 sm:p-12 lg:p-16 relative">
         
         <div className="max-w-[440px] w-full space-y-6">
           

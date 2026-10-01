@@ -256,8 +256,8 @@ export const Module11Promotions = ({ promotions = [], setPromotions, onRefresh }
 
       {/* Add Coupon Modal */}
       {showAddPromo && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <form onSubmit={handleCreateCoupon} className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-in fade-in">
+          <form onSubmit={handleCreateCoupon} className="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Create Discount Coupon</h3>

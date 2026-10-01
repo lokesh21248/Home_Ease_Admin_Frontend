@@ -60,6 +60,9 @@ export default function App() {
     setActiveModule('dashboard');
   };
 
+  // Responsive Navigation State
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
   // Live Server Status & Sync State
   const [serverOnline, setServerOnline] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -280,15 +283,20 @@ export default function App() {
       {/* 240px Collapsible Left Admin Navigation Sidebar */}
       <Sidebar 
         activeModule={activeModule}
-        setActiveModule={setActiveModule}
+        setActiveModule={(mod) => {
+          setActiveModule(mod);
+          setIsMobileSidebarOpen(false);
+        }}
         isCollapsed={isCollapsed}
         setIsCollapsed={setIsCollapsed}
+        isMobileOpen={isMobileSidebarOpen}
+        setIsMobileOpen={setIsMobileSidebarOpen}
         currentRole={currentRole}
         onLogout={handleLogout}
       />
 
       {/* Main Dynamic View Area */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isCollapsed ? 'ml-20' : 'ml-64'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ml-0 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         {/* Top Header */}
         <Header 
           activeModule={activeModule}
@@ -303,10 +311,11 @@ export default function App() {
           onLogout={handleLogout}
           isCollapsed={isCollapsed}
           setIsCollapsed={setIsCollapsed}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
         />
 
         {/* Dynamic Screen View Module Switcher */}
-        <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <main className="flex-1 p-3 sm:p-5 md:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6 min-w-0 overflow-x-hidden">
           {activeModule === 'dashboard' && (
             <Module02Dashboard 
               rawStats={rawStats}
