@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { 
   Users, ShieldCheck, Clock, Ban, Search, Download, Plus, 
   Send, Shield, CheckCircle, MapPin, Eye, X, ChevronLeft, ChevronRight, 
-  AlertTriangle, Check, ArrowUpDown, ChevronDown, Loader2, User, FileText, ImageOff
+  AlertTriangle, Check, ArrowUpDown, ChevronDown, Loader2, FileText, ImageOff,
+  ExternalLink, ZoomIn, Upload, Copy, CreditCard, Building2, CheckCircle2,
+  Phone, FileBadge
 } from 'lucide-react';
 import { blockWorker, unblockWorker, verifyWorkerKYC, uploadWorkerProfile, uploadWorkerPan, uploadWorkerAadhaar } from '../api/adminApi';
 
@@ -12,23 +14,54 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
     ? workers.map((w, i) => {
         const id = w.workerId || w.id || `w-${i+1}`;
         const isVerified = w.isVerified ?? (w.kycStatus === 'VERIFIED');
-        const isBlocked = w.isBlocked ?? false;
+        const isBlocked = w.isBlocked ?? (w.blockedUntil && new Date(w.blockedUntil) > new Date()) ?? false;
+        
+        // Extract real legal name, contact from user object or top-level without dummy values
+        const fullName = w.user?.fullName || w.fullName || w.name || '';
+        const phone = w.user?.phoneNumber || w.phoneNumber || w.phone || '';
+        const email = w.user?.email || w.email || '';
+        const role = w.user?.role || w.role || 'WORKER';
+        const address = w.address || '';
+        const panNumber = w.panNumber || '';
+        const panDocUrl = w.panDocUrl || null;
+        const aadhaarDocUrl = w.aadhaarDocUrl || w.kycDocumentUrl || null;
+        const bankAccountNo = w.bankAccountNo || '';
+        const bankIfsc = w.bankIfsc || '';
+        const createdAt = w.createdAt || w.user?.createdAt;
+        const formattedDate = createdAt 
+          ? new Date(createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) 
+          : '';
+
         return {
           ...w,
           id,
           workerId: id,
-          name: w.fullName || w.name || 'Partner Worker',
-          email: w.email || 'worker@homeease.in',
-          phone: w.phoneNumber || w.phone || '-',
-          address: w.address || 'Address unlisted',
+          userId: w.user?.userId || w.userId,
+          name: fullName || 'Partner Worker',
+          fullName: fullName,
+          phone: phone,
+          phoneNumber: phone,
+          email: email,
+          role,
+          address: address,
+          panNumber: panNumber,
+          panDocUrl: panDocUrl,
+          aadhaarDocUrl: aadhaarDocUrl,
+          bankAccountNo: bankAccountNo,
+          bankIfsc: bankIfsc,
+          createdAt,
+          formattedDate,
           kycStatus: isVerified ? 'VERIFIED' : (w.kycStatus || 'PENDING'),
           kycLabel: isVerified ? 'Verified (Emerald)' : (w.kycStatus || 'Pending Review'),
           isOnline: w.isOnline !== undefined ? w.isOnline : false,
-          coordinates: (w.currentLat && w.currentLng) ? `${w.currentLat}, ${w.currentLng}` : (w.coordinates || 'N/A'),
-          lastSeen: w.lastSeen || (w.updatedAt ? new Date(w.updatedAt).toLocaleTimeString() : 'Recently'),
+          coordinates: (w.currentLat && w.currentLng) ? `${w.currentLat}, ${w.currentLng}` : (w.coordinates || ''),
+          lastSeen: w.lastSeen || (w.updatedAt ? new Date(w.updatedAt).toLocaleTimeString() : ''),
           isBlocked,
           disciplinaryStatus: isBlocked ? 'Blocked' : 'Active',
-          avatar: w.profilePhotoUrl || w.avatar || ''
+          avatar: w.profilePhotoUrl || w.avatar || '',
+          rating: (w.rating !== undefined && w.rating !== null) ? w.rating : null,
+          jobsCompleted: (w.jobsCompleted !== undefined && w.jobsCompleted !== null) ? w.jobsCompleted : null,
+          skills: w.skills || ''
         };
       })
     : [];
@@ -44,10 +77,78 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
   // Modals & Drawers state
   const [activeWorkerModal, setActiveWorkerModal] = useState(null); // 'review-kyc' | 'discipline' | 'profile' | 'add-worker' | 'broadcast'
   const [modalTargetWorker, setModalTargetWorker] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null); // { url, title, workerName, workerId, type, docNumber }
+  const [uploadingDocType, setUploadingDocType] = useState(null); // 'aadhaar' | 'pan' | 'avatar'
+  const [copiedField, setCopiedField] = useState(null);
   const [blockDurationHours, setBlockDurationHours] = useState(24);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+
+
+
+  // Copy helper
+  const copyToClipboard = (text, fieldName) => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text);
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  // Live document upload handler
+  const handleUploadDocument = async (workerId, type, file) => {
+    if (!file || !workerId) return;
+    setUploadingDocType(type);
+    try {
+      let uploadedUrl = '';
+      if (type === 'aadhaar') {
+        uploadedUrl = await uploadWorkerAadhaar(workerId, file);
+      } else if (type === 'pan') {
+        uploadedUrl = await uploadWorkerPan(workerId, file);
+      } else if (type === 'avatar') {
+        uploadedUrl = await uploadWorkerProfile(workerId, file);
+      }
+
+      setWorkers(prev => {
+        const list = prev && prev.length > 0 ? prev : [];
+        return list.map(w => {
+          if (w.workerId === workerId || w.id === workerId) {
+            const updated = { ...w };
+            if (type === 'aadhaar') updated.aadhaarDocUrl = uploadedUrl;
+            if (type === 'pan') updated.panDocUrl = uploadedUrl;
+            if (type === 'avatar') {
+              updated.profilePhotoUrl = uploadedUrl;
+              updated.avatar = uploadedUrl;
+            }
+            return updated;
+          }
+          return w;
+        });
+      });
+
+      if (modalTargetWorker && (modalTargetWorker.workerId === workerId || modalTargetWorker.id === workerId)) {
+        setModalTargetWorker(prev => {
+          const updated = { ...prev };
+          if (type === 'aadhaar') updated.aadhaarDocUrl = uploadedUrl;
+          if (type === 'pan') updated.panDocUrl = uploadedUrl;
+          if (type === 'avatar') {
+            updated.profilePhotoUrl = uploadedUrl;
+            updated.avatar = uploadedUrl;
+          }
+          return updated;
+        });
+      }
+
+      setToastMessage(`${type.toUpperCase()} document uploaded successfully to Supabase S3!`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error(`Failed to upload ${type}:`, err);
+      setToastMessage(`Upload failed: ${err.message}`);
+    } finally {
+      setUploadingDocType(null);
+      setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
 
   // New Worker Form state
   const [newWorkerName, setNewWorkerName] = useState('');
@@ -178,19 +279,21 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
       id: `w-${Date.now()}`,
       workerId: `w-${Date.now()}`,
       name: newWorkerName,
-      email: newWorkerEmail || 'partner@homeease.in',
-      phone: newWorkerPhone || '+91 9000000000',
-      address: newWorkerAddress || '#10, Bengaluru',
+      fullName: newWorkerName,
+      email: newWorkerEmail || '',
+      phone: newWorkerPhone || '',
+      phoneNumber: newWorkerPhone || '',
+      address: newWorkerAddress || '',
       kycStatus: 'PENDING',
       kycLabel: 'Pending Review',
-      isOnline: true,
-      coordinates: '12.9716, 77.5946',
-      lastSeen: 'Just now',
+      isOnline: false,
+      coordinates: '',
+      lastSeen: '',
       isBlocked: false,
       disciplinaryStatus: 'Active',
       avatar: null,
-      skills: 'General Service',
-      rating: 5.0,
+      skills: '',
+      rating: null,
       jobsCompleted: 0
     };
 
@@ -460,6 +563,12 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
                   </div>
                 </th>
                 <th className="py-3.5 px-4">
+                  <div className="flex items-center gap-1.5 text-slate-700">
+                    <FileBadge className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Uploaded Documents</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4">
                   <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700">
                     <span>KYC Status</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-400" />
@@ -485,7 +594,7 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredWorkers.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="py-12 text-center text-slate-400">
+                  <td colSpan="8" className="py-12 text-center text-slate-400">
                     <Users className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                     <div className="font-semibold text-slate-600">No partner workers found</div>
                     <div className="text-xs text-slate-400 mt-0.5">Workers registered or verified through the mobile partner app will appear here.</div>
@@ -547,10 +656,73 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
                     </td>
 
                     {/* Address with MapPin */}
-                    <td className="py-3.5 px-4 max-w-[220px]">
+                    <td className="py-3.5 px-4 max-w-[200px]">
                       <div className="flex items-start gap-1.5 text-slate-600 leading-snug">
                         <MapPin className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <span className="text-[11px] font-medium">{w.address}</span>
+                        <span className="text-[11px] font-medium truncate" title={w.address}>{w.address}</span>
+                      </div>
+                    </td>
+
+                    {/* Uploaded Documents Quick Access */}
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          {/* Aadhaar Badge */}
+                          {w.aadhaarDocUrl ? (
+                            <button
+                              onClick={() => setPreviewDoc({
+                                url: w.aadhaarDocUrl,
+                                title: 'Govt Aadhaar Card Document',
+                                workerName: w.name,
+                                workerId: w.workerId,
+                                type: 'aadhaar'
+                              })}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition cursor-pointer shadow-2xs"
+                              title="Click to preview Aadhaar scan"
+                            >
+                              <FileText className="w-3 h-3 text-blue-600" />
+                              <span>Aadhaar</span>
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200">
+                              <FileText className="w-3 h-3 text-slate-300" />
+                              <span>No Aadhaar</span>
+                            </span>
+                          )}
+
+                          {/* PAN Badge */}
+                          {w.panDocUrl ? (
+                            <button
+                              onClick={() => setPreviewDoc({
+                                url: w.panDocUrl,
+                                title: `Income Tax PAN Card (${w.panNumber || 'Attached'})`,
+                                workerName: w.name,
+                                workerId: w.workerId,
+                                type: 'pan',
+                                docNumber: w.panNumber
+                              })}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition cursor-pointer shadow-2xs"
+                              title="Click to preview PAN scan"
+                            >
+                              <CreditCard className="w-3 h-3 text-amber-600" />
+                              <span>PAN</span>
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200">
+                              <CreditCard className="w-3 h-3 text-slate-300" />
+                              <span>No PAN</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {w.panNumber && (
+                          <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                            <span>PAN:</span>
+                            <span className="font-bold text-slate-600">{w.panNumber}</span>
+                          </div>
+                        )}
                       </div>
                     </td>
 
@@ -707,55 +879,307 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
       {/* MODAL: Review Worker KYC Document                                         */}
       {/* ========================================================================= */}
       {activeWorkerModal === 'review-kyc' && modalTargetWorker && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Worker KYC Review</h3>
-                <p className="text-xs text-slate-500">{modalTargetWorker.name} • {modalTargetWorker.phone}</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900">Worker KYC & Compliance Review</h3>
+                  {modalTargetWorker.kycStatus === 'VERIFIED' ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <Check className="w-3 h-3 text-emerald-600" /> Emerald Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                      <Clock className="w-3 h-3 text-amber-600" /> Pending Review
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                  {modalTargetWorker.name} • {modalTargetWorker.phone} • UUID: {modalTargetWorker.workerId}
+                </p>
               </div>
-              <button onClick={() => setActiveWorkerModal(null)} className="text-slate-400 hover:text-slate-600 p-1">
+              <button onClick={() => setActiveWorkerModal(null)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-slate-800">Govt Aadhaar / PAN Verification</div>
-                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">UIDAI Token: 8294-XXXX-9912</div>
-                </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700">
-                  Document Verified
-                </span>
+            {/* Uploaded Documents Dossier (Side-by-Side Cards) */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+                  <FileBadge className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Submitted Identification Documents (Supabase S3)</span>
+                </h4>
+                <span className="text-[11px] font-semibold text-slate-400">Click any document to enlarge</span>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-700 mb-1.5">Submitted Identity Card Scan</div>
-                <div className="h-36 rounded-xl bg-slate-50 border border-dashed border-slate-200 overflow-hidden flex flex-col items-center justify-center p-4 text-center">
-                  <FileText className="w-10 h-10 text-blue-500 mb-1.5" />
-                  <span className="text-xs font-bold text-slate-700">Official Government Identity Document</span>
-                  <span className="text-[11px] text-slate-400 mt-0.5">Stored in Supabase S3 (homeease-worker-kyc)</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Aadhaar Card Scan */}
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Govt Aadhaar Card</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">UIDAI Identity Proof</div>
+                    </div>
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Missing
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Aadhaar Preview Box */}
+                  <div 
+                    onClick={() => modalTargetWorker.aadhaarDocUrl && setPreviewDoc({
+                      url: modalTargetWorker.aadhaarDocUrl,
+                      title: 'Govt Aadhaar Card Document',
+                      workerName: modalTargetWorker.name,
+                      workerId: modalTargetWorker.workerId,
+                      type: 'aadhaar'
+                    })}
+                    className="relative group h-40 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition shadow-2xs"
+                  >
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <>
+                        <img 
+                          src={modalTargetWorker.aadhaarDocUrl} 
+                          alt="Aadhaar Scan" 
+                          className="w-full h-full object-contain p-2"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            const fb = e.target.parentElement.querySelector('.aadhaar-doc-fallback');
+                            if (fb) fb.style.display = 'flex';
+                          }}
+                        />
+                        <div className="aadhaar-doc-fallback hidden flex-col items-center justify-center p-3 text-center">
+                          <FileText className="w-8 h-8 text-blue-500 mb-1" />
+                          <span className="text-xs font-bold text-slate-700">Aadhaar Card Attached</span>
+                          <span className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5">Stored in Supabase S3</span>
+                        </div>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                          <span className="px-2.5 py-1 bg-white text-slate-800 rounded-md text-[11px] font-bold shadow-md flex items-center gap-1">
+                            <ZoomIn className="w-3.5 h-3.5" /> Enlarge
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-4 text-center">
+                        <ImageOff className="w-8 h-8 text-slate-300 mx-auto mb-1" />
+                        <span className="text-xs font-semibold text-slate-400">No Aadhaar Uploaded</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Aadhaar Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-xs">
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <a
+                        href={modalTargetWorker.aadhaarDocUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Open S3
+                      </a>
+                    ) : <span />}
+
+                    <label className="text-[11px] font-bold text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-100">
+                      <Upload className="w-3 h-3 text-slate-500" />
+                      <span>{uploadingDocType === 'aadhaar' ? 'Uploading...' : 'Replace Scan'}</span>
+                      <input 
+                        type="file" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleUploadDocument(modalTargetWorker.workerId, 'aadhaar', e.target.files[0]);
+                        }} 
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* 2. PAN Card Scan */}
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3.5 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Income Tax PAN Card</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">PAN: {modalTargetWorker.panNumber}</div>
+                    </div>
+                    {modalTargetWorker.panDocUrl ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Missing
+                      </span>
+                    )}
+                  </div>
+
+                  {/* PAN Preview Box */}
+                  <div 
+                    onClick={() => modalTargetWorker.panDocUrl && setPreviewDoc({
+                      url: modalTargetWorker.panDocUrl,
+                      title: `Income Tax PAN Card (${modalTargetWorker.panNumber})`,
+                      workerName: modalTargetWorker.name,
+                      workerId: modalTargetWorker.workerId,
+                      type: 'pan',
+                      docNumber: modalTargetWorker.panNumber
+                    })}
+                    className="relative group h-40 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition shadow-2xs"
+                  >
+                    {modalTargetWorker.panDocUrl ? (
+                      <>
+                        <img 
+                          src={modalTargetWorker.panDocUrl} 
+                          alt="PAN Scan" 
+                          className="w-full h-full object-contain p-2"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            const fb = e.target.parentElement.querySelector('.pan-doc-fallback');
+                            if (fb) fb.style.display = 'flex';
+                          }}
+                        />
+                        <div className="pan-doc-fallback hidden flex-col items-center justify-center p-3 text-center">
+                          <CreditCard className="w-8 h-8 text-amber-500 mb-1" />
+                          <span className="text-xs font-bold text-slate-700">PAN Card Attached</span>
+                          <span className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5">PAN: {modalTargetWorker.panNumber}</span>
+                        </div>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                          <span className="px-2.5 py-1 bg-white text-slate-800 rounded-md text-[11px] font-bold shadow-md flex items-center gap-1">
+                            <ZoomIn className="w-3.5 h-3.5" /> Enlarge
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-4 text-center">
+                        <ImageOff className="w-8 h-8 text-slate-300 mx-auto mb-1" />
+                        <span className="text-xs font-semibold text-slate-400">No PAN Uploaded</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* PAN Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-xs">
+                    {modalTargetWorker.panDocUrl ? (
+                      <a
+                        href={modalTargetWorker.panDocUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Open S3
+                      </a>
+                    ) : <span />}
+
+                    <label className="text-[11px] font-bold text-slate-600 hover:text-slate-800 inline-flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-100">
+                      <Upload className="w-3 h-3 text-slate-500" />
+                      <span>{uploadingDocType === 'pan' ? 'Uploading...' : 'Replace Scan'}</span>
+                      <input 
+                        type="file" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleUploadDocument(modalTargetWorker.workerId, 'pan', e.target.files[0]);
+                        }} 
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bank & Payout Information Box */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">PAN Number</div>
+                  <div className="font-mono font-bold text-slate-800 flex items-center gap-1.5 mt-0.5">
+                    <span>{modalTargetWorker.panNumber || 'Not provided'}</span>
+                    {modalTargetWorker.panNumber && (
+                      <button 
+                        onClick={() => copyToClipboard(modalTargetWorker.panNumber, 'pan')} 
+                        className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        title="Copy PAN"
+                      >
+                        {copiedField === 'pan' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Bank Account Number</div>
+                  <div className="font-mono font-bold text-slate-800 flex items-center gap-1.5 mt-0.5">
+                    <span>{modalTargetWorker.bankAccountNo || 'Not provided'}</span>
+                    {modalTargetWorker.bankAccountNo && (
+                      <button 
+                        onClick={() => copyToClipboard(modalTargetWorker.bankAccountNo, 'bank')} 
+                        className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        title="Copy Bank Account"
+                      >
+                        {copiedField === 'bank' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Bank IFSC Code</div>
+                  <div className="font-mono font-bold text-slate-800 flex items-center gap-1.5 mt-0.5">
+                    <span>{modalTargetWorker.bankIfsc || 'Not provided'}</span>
+                    {modalTargetWorker.bankIfsc && (
+                      <button 
+                        onClick={() => copyToClipboard(modalTargetWorker.bankIfsc, 'ifsc')} 
+                        className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        title="Copy IFSC"
+                      >
+                        {copiedField === 'ifsc' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
               <button
-                onClick={() => setActiveWorkerModal(null)}
-                className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl"
+                onClick={() => {
+                  setActiveWorkerModal('discipline');
+                }}
+                className="px-3 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
               >
-                Close
+                <Ban className="w-3.5 h-3.5" />
+                <span>Reject / Suspend</span>
               </button>
-              <button
-                onClick={handleApproveKYC}
-                disabled={isProcessing}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm"
-              >
-                {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <Check className="w-4 h-4 stroke-[2.5]" />
-                <span>Grant Emerald Verification</span>
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActiveWorkerModal(null)}
+                  className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleApproveKYC}
+                  disabled={isProcessing}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition"
+                >
+                  {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  <span>Grant Emerald Verification</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -822,69 +1246,562 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: View Worker Profile Drawer                                         */}
+      {/* MODAL: View Worker Profile Drawer & Full Documents Dossier                */}
       {/* ========================================================================= */}
       {activeWorkerModal === 'profile' && modalTargetWorker && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-bold text-slate-900">Partner Details</h3>
-              <button onClick={() => setActiveWorkerModal(null)} className="text-slate-400 hover:text-slate-600 p-1">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8 max-h-[92vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3.5">
+                <div className="relative">
+                  {modalTargetWorker.avatar && !modalTargetWorker.avatar.includes('unsplash') ? (
+                    <img 
+                      src={modalTargetWorker.avatar} 
+                      alt={modalTargetWorker.name} 
+                      className="w-16 h-16 rounded-full object-cover border-2 border-slate-200 shadow-sm"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        const fallback = e.target.parentElement.querySelector('.modal-worker-avatar-fallback');
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div 
+                    className="modal-worker-avatar-fallback w-16 h-16 rounded-full bg-blue-50 border-2 border-blue-200 text-blue-600 flex items-center justify-center font-bold text-xl shrink-0 select-none shadow-sm"
+                    style={{ display: (modalTargetWorker.avatar && !modalTargetWorker.avatar.includes('unsplash')) ? 'none' : 'flex' }}
+                  >
+                    {modalTargetWorker.name?.charAt(0)?.toUpperCase() || 'W'}
+                  </div>
+
+                  {/* Upload photo trigger */}
+                  <label 
+                    className="absolute -bottom-1 -right-1 p-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-full text-slate-600 cursor-pointer shadow-xs"
+                    title="Upload profile photo"
+                  >
+                    <Upload className="w-3 h-3" />
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleUploadDocument(modalTargetWorker.workerId, 'avatar', e.target.files[0]);
+                      }} 
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-black text-slate-900">{modalTargetWorker.name}</h3>
+                    {modalTargetWorker.kycStatus === 'VERIFIED' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E6F4EA] text-[#137333] border border-emerald-200">
+                        <Check className="w-3 h-3 stroke-[3]" /> Verified Emerald
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FEF3C7] text-[#D97706] border border-amber-200">
+                        <Clock className="w-3 h-3 stroke-[2.5]" /> Pending KYC
+                      </span>
+                    )}
+
+                    {!modalTargetWorker.isBlocked ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200">
+                        Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                        Suspended
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">{modalTargetWorker.skills || 'Service Partner'}</p>
+                  <p className="text-[11px] font-mono text-slate-400 mt-0.5">Worker UUID: {modalTargetWorker.workerId}</p>
+                </div>
+              </div>
+
+              <button onClick={() => setActiveWorkerModal(null)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center gap-3">
-                {modalTargetWorker.avatar && !modalTargetWorker.avatar.includes('unsplash') ? (
-                  <img 
-                    src={modalTargetWorker.avatar} 
-                    alt={modalTargetWorker.name} 
-                    className="w-14 h-14 rounded-full object-cover border-2 border-slate-200 shadow-sm"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      const fallback = e.target.parentElement.querySelector('.modal-worker-avatar-fallback');
-                      if (fallback) fallback.style.display = 'flex';
-                    }}
-                  />
-                ) : null}
-                <div 
-                  className="modal-worker-avatar-fallback w-14 h-14 rounded-full bg-blue-50 border-2 border-blue-200 text-blue-600 flex items-center justify-center font-bold text-base shrink-0 select-none shadow-sm"
-                  style={{ display: (modalTargetWorker.avatar && !modalTargetWorker.avatar.includes('unsplash')) ? 'none' : 'flex' }}
-                >
-                  {modalTargetWorker.name?.charAt(0)?.toUpperCase() || 'W'}
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">{modalTargetWorker.name}</h4>
-                  <p className="text-slate-500 font-medium">{modalTargetWorker.skills || 'HomeEase Verified Specialist'}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{modalTargetWorker.phone}</p>
+            {/* Top KPI Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Customer Rating</div>
+                <div className="text-sm font-black text-slate-900 mt-0.5">
+                  {modalTargetWorker.rating !== null && modalTargetWorker.rating !== undefined 
+                    ? `★ ${modalTargetWorker.rating} / 5.0` 
+                    : 'Not Rated'}
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Customer Rating</div>
-                  <div className="text-sm font-black text-slate-900">★ {modalTargetWorker.rating || 4.9} / 5.0</div>
-                </div>
-                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Completed Jobs</div>
-                  <div className="text-sm font-black text-slate-900">{modalTargetWorker.jobsCompleted || 142} orders</div>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Completed Jobs</div>
+                <div className="text-sm font-black text-slate-900 mt-0.5">
+                  {modalTargetWorker.jobsCompleted !== null && modalTargetWorker.jobsCompleted !== undefined 
+                    ? `${modalTargetWorker.jobsCompleted} orders` 
+                    : '0 orders'}
                 </div>
               </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Registered Service Territory</div>
-                <div className="text-xs font-semibold text-slate-800">{modalTargetWorker.address}</div>
-                <div className="text-[10px] font-mono text-slate-400">GPS: {modalTargetWorker.coordinates}</div>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Live Fleet Status</div>
+                <div className="text-sm font-bold text-slate-900 mt-0.5 flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${modalTargetWorker.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                  <span>{modalTargetWorker.isOnline ? 'Online' : 'Offline'}</span>
+                </div>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Registered On</div>
+                <div className="text-xs font-bold text-slate-900 mt-1">{modalTargetWorker.formattedDate || '-'}</div>
               </div>
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-slate-100">
+            {/* Contact & Banking Information Sections */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Left: Contact & Territory */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                <h4 className="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Contact & Service Territory</span>
+                </h4>
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Mobile Phone</div>
+                    <div className="font-semibold text-slate-800 flex items-center gap-2 mt-0.5">
+                      <span>{modalTargetWorker.phone || 'Not provided'}</span>
+                      {modalTargetWorker.phone && (
+                        <button 
+                          onClick={() => copyToClipboard(modalTargetWorker.phone, 'phone')} 
+                          className="text-slate-400 hover:text-slate-600 cursor-pointer" 
+                          title="Copy phone"
+                        >
+                          {copiedField === 'phone' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Email Address</div>
+                    <div className="font-semibold text-slate-800 flex items-center gap-2 mt-0.5">
+                      <span>{modalTargetWorker.email || 'Not provided'}</span>
+                      {modalTargetWorker.email && (
+                        <button 
+                          onClick={() => copyToClipboard(modalTargetWorker.email, 'email')} 
+                          className="text-slate-400 hover:text-slate-600 cursor-pointer" 
+                          title="Copy email"
+                        >
+                          {copiedField === 'email' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Base Service Territory</div>
+                    <div className="font-semibold text-slate-800 mt-0.5">{modalTargetWorker.address || 'Not provided'}</div>
+                    {modalTargetWorker.coordinates && (
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5">GPS: {modalTargetWorker.coordinates}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Banking & Payouts */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                <h4 className="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Banking & Tax Details</span>
+                </h4>
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Income Tax PAN Number</div>
+                    <div className="font-mono font-bold text-slate-800 flex items-center gap-2 mt-0.5">
+                      <span>{modalTargetWorker.panNumber || 'Not provided'}</span>
+                      {modalTargetWorker.panNumber && (
+                        <button 
+                          onClick={() => copyToClipboard(modalTargetWorker.panNumber, 'pan')} 
+                          className="text-slate-400 hover:text-slate-600 cursor-pointer" 
+                          title="Copy PAN"
+                        >
+                          {copiedField === 'pan' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Bank Account Number</div>
+                    <div className="font-mono font-bold text-slate-800 flex items-center gap-2 mt-0.5">
+                      <span>{modalTargetWorker.bankAccountNo || 'Not provided'}</span>
+                      {modalTargetWorker.bankAccountNo && (
+                        <button 
+                          onClick={() => copyToClipboard(modalTargetWorker.bankAccountNo, 'bank')} 
+                          className="text-slate-400 hover:text-slate-600 cursor-pointer" 
+                          title="Copy Account Number"
+                        >
+                          {copiedField === 'bank' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Bank IFSC Code</div>
+                    <div className="font-mono font-bold text-slate-800 flex items-center gap-2 mt-0.5">
+                      <span>{modalTargetWorker.bankIfsc || 'Not provided'}</span>
+                      {modalTargetWorker.bankIfsc && (
+                        <button 
+                          onClick={() => copyToClipboard(modalTargetWorker.bankIfsc, 'ifsc')} 
+                          className="text-slate-400 hover:text-slate-600 cursor-pointer" 
+                          title="Copy IFSC"
+                        >
+                          {copiedField === 'ifsc' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* =================================================================== */}
+            {/* UPLOADED DOCUMENTS SECTION (Full KYC Scans)                        */}
+            {/* =================================================================== */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5">
+                  <FileBadge className="w-4 h-4 text-blue-600" />
+                  <span>Uploaded Verification Documents</span>
+                </h4>
+                <span className="text-[11px] text-slate-400 font-medium">Click scan to inspect or upload updated copy</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1. Aadhaar Card Card */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Govt Aadhaar Card</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">UIDAI ID Proof</div>
+                    </div>
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Missing
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Thumbnail / Preview Area */}
+                  <div 
+                    onClick={() => modalTargetWorker.aadhaarDocUrl && setPreviewDoc({
+                      url: modalTargetWorker.aadhaarDocUrl,
+                      title: 'Govt Aadhaar Card Document',
+                      workerName: modalTargetWorker.name,
+                      workerId: modalTargetWorker.workerId,
+                      type: 'aadhaar'
+                    })}
+                    className="relative group h-44 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition shadow-2xs"
+                  >
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <>
+                        <img 
+                          src={modalTargetWorker.aadhaarDocUrl} 
+                          alt="Aadhaar Document Scan" 
+                          className="w-full h-full object-contain p-2"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            const fb = e.target.parentElement.querySelector('.profile-aadhaar-fallback');
+                            if (fb) fb.style.display = 'flex';
+                          }}
+                        />
+                        <div className="profile-aadhaar-fallback hidden flex-col items-center justify-center p-3 text-center">
+                          <FileText className="w-10 h-10 text-blue-500 mb-1" />
+                          <span className="text-xs font-bold text-slate-800">Aadhaar Card Attached</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">Supabase S3 Link Available</span>
+                        </div>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                          <span className="px-3 py-1 bg-white text-slate-800 rounded-lg text-xs font-bold shadow-md flex items-center gap-1.5">
+                            <ZoomIn className="w-4 h-4 text-blue-600" /> View Full Document
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-4 text-center">
+                        <ImageOff className="w-8 h-8 text-slate-300 mx-auto mb-1" />
+                        <span className="text-xs font-semibold text-slate-400">No Aadhaar Document Attached</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-xs">
+                    {modalTargetWorker.aadhaarDocUrl ? (
+                      <a
+                        href={modalTargetWorker.aadhaarDocUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Direct S3 Link
+                      </a>
+                    ) : <span />}
+
+                    <label className="text-[11px] font-bold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 cursor-pointer bg-white px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 transition shadow-2xs">
+                      <Upload className="w-3 h-3 text-slate-500" />
+                      <span>{uploadingDocType === 'aadhaar' ? 'Uploading...' : 'Replace Scan'}</span>
+                      <input 
+                        type="file" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleUploadDocument(modalTargetWorker.workerId, 'aadhaar', e.target.files[0]);
+                        }} 
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* 2. PAN Card Card */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Income Tax PAN Card</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">PAN: {modalTargetWorker.panNumber}</div>
+                    </div>
+                    {modalTargetWorker.panDocUrl ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Uploaded
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                        Missing
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Thumbnail / Preview Area */}
+                  <div 
+                    onClick={() => modalTargetWorker.panDocUrl && setPreviewDoc({
+                      url: modalTargetWorker.panDocUrl,
+                      title: `Income Tax PAN Card (${modalTargetWorker.panNumber})`,
+                      workerName: modalTargetWorker.name,
+                      workerId: modalTargetWorker.workerId,
+                      type: 'pan',
+                      docNumber: modalTargetWorker.panNumber
+                    })}
+                    className="relative group h-44 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition shadow-2xs"
+                  >
+                    {modalTargetWorker.panDocUrl ? (
+                      <>
+                        <img 
+                          src={modalTargetWorker.panDocUrl} 
+                          alt="PAN Document Scan" 
+                          className="w-full h-full object-contain p-2"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            const fb = e.target.parentElement.querySelector('.profile-pan-fallback');
+                            if (fb) fb.style.display = 'flex';
+                          }}
+                        />
+                        <div className="profile-pan-fallback hidden flex-col items-center justify-center p-3 text-center">
+                          <CreditCard className="w-10 h-10 text-amber-500 mb-1" />
+                          <span className="text-xs font-bold text-slate-800">PAN Card Attached</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">PAN: {modalTargetWorker.panNumber}</span>
+                        </div>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                          <span className="px-3 py-1 bg-white text-slate-800 rounded-lg text-xs font-bold shadow-md flex items-center gap-1.5">
+                            <ZoomIn className="w-4 h-4 text-amber-600" /> View Full Document
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-4 text-center">
+                        <ImageOff className="w-8 h-8 text-slate-300 mx-auto mb-1" />
+                        <span className="text-xs font-semibold text-slate-400">No PAN Document Attached</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-xs">
+                    {modalTargetWorker.panDocUrl ? (
+                      <a
+                        href={modalTargetWorker.panDocUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Direct S3 Link
+                      </a>
+                    ) : <span />}
+
+                    <label className="text-[11px] font-bold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 cursor-pointer bg-white px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 transition shadow-2xs">
+                      <Upload className="w-3 h-3 text-slate-500" />
+                      <span>{uploadingDocType === 'pan' ? 'Uploading...' : 'Replace Scan'}</span>
+                      <input 
+                        type="file" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleUploadDocument(modalTargetWorker.workerId, 'pan', e.target.files[0]);
+                        }} 
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                {modalTargetWorker.kycStatus !== 'VERIFIED' && (
+                  <button
+                    onClick={handleApproveKYC}
+                    disabled={isProcessing}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition"
+                  >
+                    {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <Check className="w-4 h-4 stroke-[2.5]" />
+                    <span>Approve KYC (Emerald)</span>
+                  </button>
+                )}
+
+                {!modalTargetWorker.isBlocked ? (
+                  <button
+                    onClick={() => setActiveWorkerModal('discipline')}
+                    className="px-3.5 py-2 bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
+                  >
+                    <Ban className="w-3.5 h-3.5" />
+                    <span>Suspend Partner</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleUnblock(modalTargetWorker)}
+                    className="px-3.5 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Unblock Partner</span>
+                  </button>
+                )}
+              </div>
+
               <button
                 onClick={() => setActiveWorkerModal(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl"
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: Full Document Lightbox Preview & Zoom                              */}
+      {/* ========================================================================= */}
+      {previewDoc && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[70] animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <FileBadge className="w-4 h-4 text-blue-600" />
+                  <span>{previewDoc.title}</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Partner: <span className="font-semibold text-slate-700">{previewDoc.workerName}</span> • URL: <span className="font-mono text-[10px] text-slate-400">{previewDoc.url}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewDoc.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold text-xs rounded-xl inline-flex items-center gap-1.5 transition"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Tab</span>
+                </a>
+                <button
+                  onClick={() => setPreviewDoc(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Document Image Lightbox Container */}
+            <div className="flex-1 min-h-[350px] max-h-[60vh] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center p-3 relative">
+              <img 
+                src={previewDoc.url} 
+                alt={previewDoc.title} 
+                className="max-w-full max-h-[55vh] object-contain rounded-lg shadow-md"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  const fb = e.target.parentElement.querySelector('.lightbox-fallback');
+                  if (fb) fb.style.display = 'flex';
+                }}
+              />
+              <div className="lightbox-fallback hidden flex-col items-center justify-center p-8 text-center max-w-md">
+                <FileText className="w-16 h-16 text-blue-500 mb-3" />
+                <h4 className="text-sm font-bold text-slate-800">Supabase S3 Document Scan</h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  This document record is registered in the cloud database at:
+                </p>
+                <code className="text-[11px] font-mono bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 mt-2 break-all">
+                  {previewDoc.url}
+                </code>
+                <div className="flex items-center gap-2 mt-4">
+                  <a
+                    href={previewDoc.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3.5 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition"
+                  >
+                    Open Document Link
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Lightbox Footer */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+              <label className="font-bold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1.5 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 transition">
+                <Upload className="w-3.5 h-3.5 text-slate-500" />
+                <span>Upload New Version</span>
+                <input 
+                  type="file" 
+                  accept="image/*,.pdf" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files?.[0] && previewDoc.workerId && previewDoc.type) {
+                      handleUploadDocument(previewDoc.workerId, previewDoc.type, e.target.files[0]);
+                      setPreviewDoc(null);
+                    }
+                  }} 
+                />
+              </label>
+
+              <button
+                onClick={() => setPreviewDoc(null)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl"
+              >
+                Close Preview
               </button>
             </div>
           </div>
