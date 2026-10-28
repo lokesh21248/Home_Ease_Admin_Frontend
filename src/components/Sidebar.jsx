@@ -2,24 +2,8 @@ import React, { useState } from 'react';
 import { 
   Home, Calendar, Users, Truck, User, BarChart3, FileText, 
   Wrench, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, 
-  Lock, LayoutDashboard, Grid, ListTree, Image, Tag, Bell, CreditCard, X
+  Lock, Image, Tag, Bell, CreditCard, X, Settings, MapPin
 } from 'lucide-react';
-
-export const MODULES = [
-  { id: 'dashboard', name: 'Dashboard', icon: Home },
-  { id: 'bookings', name: 'Bookings', icon: Calendar },
-  { id: 'workers', name: 'Workers', icon: Users },
-  { id: 'fleet', name: 'Fleet', icon: Truck },
-  { id: 'customers', name: 'Customers', icon: User },
-  { id: 'payments', name: 'Payments', icon: CreditCard },
-  { id: 'banners', name: 'Banners', icon: Image },
-  { id: 'promotions', name: 'Coupons & Deals', icon: Tag },
-  { id: 'notifications', name: 'Notifications', icon: Bell },
-  { id: 'analytics', name: 'Analytics', icon: BarChart3 },
-  { id: 'reports', name: 'Reports', icon: FileText },
-  { id: 'categories', name: 'Master Categories', icon: Grid },
-  { id: 'sub-services', name: 'Sub-Services', icon: ListTree },
-];
 
 export const Sidebar = ({ 
   activeModule, 
@@ -28,11 +12,11 @@ export const Sidebar = ({
   setIsCollapsed, 
   isMobileOpen = false,
   setIsMobileOpen,
-  currentRole, 
+  currentRole: _currentRole,
   onLogout 
 }) => {
   // Services submenu is open if either categories or sub-services is active
-  const isServicesActive = activeModule === 'categories' || activeModule === 'sub-services';
+  const isServicesActive = activeModule === 'categories' || activeModule === 'sub-services' || activeModule === 'service-areas';
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
 
   const handleNavClick = (id) => {
@@ -63,6 +47,7 @@ export const Sidebar = ({
   const analyticsNavItems = [
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -204,6 +189,18 @@ export const Sidebar = ({
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
                   <span className="truncate">Sub-Services</span>
+                </button>
+
+                <button
+                  onClick={() => handleNavClick('service-areas')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                    activeModule === 'service-areas'
+                      ? 'bg-[#0F1E36] text-blue-400 font-bold border border-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span className="truncate">Service Areas</span>
                 </button>
               </div>
             )}

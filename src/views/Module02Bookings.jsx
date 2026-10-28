@@ -36,53 +36,91 @@ export const Module02Bookings = ({
 
   // Harmonize all bookings from props + liveMap + ledger payments
   const combinedBookings = useMemo(() => {
-    const list = [...bookings];
-    const existingIds = new Set(list.map(b => b.bookingId || b.id));
+    const map = new Map();
 
-    // Incorporate active bookings from live map telemetry if not present
-    if (liveMapData?.activeBookings && Array.isArray(liveMapData.activeBookings)) {
-      liveMapData.activeBookings.forEach(ab => {
-        const id = ab.bookingId || ab.id;
-        if (id && !existingIds.has(id)) {
-          existingIds.add(id);
-          list.push({
+    // 1. Incorporate full hydrated booking records from backend
+    if (Array.isArray(bookings)) {
+      bookings.forEach(b => {
+        const id = b.bookingId || b.id;
+        if (id) {
+          map.set(id, {
+            ...b,
             bookingId: id,
             id: id,
-            customerName: ab.customerName || 'Customer',
-            customerPhone: ab.customerPhone || '+91 98765 43210',
-            serviceName: ab.serviceName || 'Home Service',
-            status: ab.bookingStatus || 'IN_PROGRESS',
-            assignedWorkerName: ab.assignedWorkerName || 'Dispatched Partner',
-            assignedWorkerId: ab.assignedWorkerId,
-            userLat: ab.userLat,
-            userLng: ab.userLng,
-            scheduledAt: new Date().toISOString(),
-            totalAmount: 599,
-            paymentStatus: 'SUCCESS',
-            paymentMethod: 'ONLINE',
-            pinCode: '7412',
-            createdAt: new Date().toISOString(),
+            customerName: b.customerName || b.userName || 'Customer',
+            customerPhone: b.customerPhone || b.userPhone || 'N/A',
+            serviceName: b.serviceName || 'Home Service',
+            status: b.status || b.bookingStatus || 'PENDING',
+            totalAmount: Number(b.totalAmount ?? b.baseAmount ?? 0),
+            baseAmount: Number(b.baseAmount ?? b.totalAmount ?? 0),
+            paymentStatus: b.paymentStatus || 'PENDING',
+            paymentMethod: b.paymentMethod || 'COD',
+            pinCode: b.pinCode || '-',
+            scheduledAt: b.scheduledAt,
+            createdAt: b.createdAt || new Date().toISOString()
           });
         }
       });
     }
 
-    // Incorporate ledger payment items as completed bookings if not present
+    // 2. Incorporate / update active bookings from live map telemetry
+    if (liveMapData?.activeBookings && Array.isArray(liveMapData.activeBookings)) {
+      liveMapData.activeBookings.forEach(ab => {
+        const id = ab.bookingId || ab.id;
+        if (!id) return;
+        if (map.has(id)) {
+          const existing = map.get(id);
+          map.set(id, {
+            ...existing,
+            userLat: ab.userLat ?? existing.userLat,
+            userLng: ab.userLng ?? existing.userLng,
+            assignedWorkerName: ab.assignedWorkerName || existing.assignedWorkerName,
+            assignedWorkerId: ab.assignedWorkerId || existing.assignedWorkerId,
+            status: existing.status || ab.bookingStatus || 'PENDING',
+            bookingStatus: existing.bookingStatus || ab.bookingStatus || 'PENDING'
+          });
+        } else {
+          map.set(id, {
+            bookingId: id,
+            id: id,
+            customerName: ab.customerName || ab.userName || 'Customer',
+            customerPhone: ab.customerPhone || ab.userPhone || 'N/A',
+            serviceName: ab.serviceName || 'Home Service',
+            status: ab.bookingStatus || 'PENDING',
+            bookingStatus: ab.bookingStatus || 'PENDING',
+            assignedWorkerName: ab.assignedWorkerName || 'Unassigned',
+            assignedWorkerId: ab.assignedWorkerId,
+            userLat: ab.userLat,
+            userLng: ab.userLng,
+            scheduledAt: ab.scheduledAt || ab.createdAt || new Date().toISOString(),
+            totalAmount: Number(ab.totalAmount || ab.grossAmount || ab.baseAmount || 0),
+            baseAmount: Number(ab.baseAmount || ab.totalAmount || 0),
+            paymentStatus: ab.paymentStatus || 'PENDING',
+            paymentMethod: ab.paymentMethod || 'COD',
+            pinCode: ab.pinCode || '-',
+            createdAt: ab.createdAt || new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    // 3. Incorporate ledger payment items as completed bookings if not present
     if (ledger && Array.isArray(ledger)) {
       ledger.forEach(p => {
         const id = p.bookingId;
-        if (id && !existingIds.has(id)) {
-          existingIds.add(id);
-          list.push({
+        if (id && !map.has(id)) {
+          map.set(id, {
             bookingId: id,
             id: id,
             customerName: p.customerName || 'Customer',
             customerPhone: p.customerPhone || 'N/A',
             serviceName: 'Completed Service',
             status: 'COMPLETED',
+            bookingStatus: 'COMPLETED',
             assignedWorkerName: 'Assigned Partner',
             scheduledAt: p.createdAt || new Date().toISOString(),
-            totalAmount: p.grossAmount || 0,
+            totalAmount: Number(p.grossAmount || 0),
+            baseAmount: Number(p.grossAmount || 0),
             paymentStatus: p.status || 'SUCCESS',
             paymentMethod: 'ONLINE',
             pinCode: 'Verified',
@@ -92,7 +130,7 @@ export const Module02Bookings = ({
       });
     }
 
-    return list;
+    return Array.from(map.values());
   }, [bookings, liveMapData, ledger]);
 
   // Filter Bookings based on search & tabs
@@ -101,7 +139,7 @@ export const Module02Bookings = ({
       const status = (b.status || b.bookingStatus || 'PENDING').toUpperCase();
       const matchesStatus = 
         selectedStatus === 'ALL' ||
-        (selectedStatus === 'PENDING' && (status === 'PENDING' || status === 'SEARCHING')) ||
+        (selectedStatus === 'PENDING' && (status === 'PENDING' || status === 'SEARCHING' || status === 'WORKER_NOT_FOUND')) ||
         (selectedStatus === 'ASSIGNED' && (status === 'ASSIGNED' || status === 'CONFIRMED' || status === 'ACCEPTED')) ||
         (selectedStatus === 'IN_PROGRESS' && (status === 'IN_PROGRESS' || status === 'IN_SERVICE')) ||
         (selectedStatus === 'COMPLETED' && status === 'COMPLETED') ||
@@ -132,6 +170,18 @@ export const Module02Bookings = ({
     });
   }, [combinedBookings, selectedStatus, selectedCategory, searchQuery]);
 
+  // Deduplicated category options for filter dropdown
+  const uniqueCategoryOptions = useMemo(() => {
+    if (!categories || !Array.isArray(categories)) return [];
+    const seen = new Set();
+    return categories.filter(c => {
+      const name = c?.name?.trim();
+      if (!name || seen.has(name.toLowerCase())) return false;
+      seen.add(name.toLowerCase());
+      return true;
+    });
+  }, [categories]);
+
   // Statistics Computations
   const stats = useMemo(() => {
     let pending = 0;
@@ -146,7 +196,7 @@ export const Module02Bookings = ({
       const amt = Number(b.totalAmount || b.grossAmount || b.baseAmount || 0);
       gmv += amt;
 
-      if (s === 'PENDING' || s === 'SEARCHING') pending++;
+      if (s === 'PENDING' || s === 'SEARCHING' || s === 'WORKER_NOT_FOUND') pending++;
       else if (s === 'ASSIGNED' || s === 'CONFIRMED' || s === 'ACCEPTED') assigned++;
       else if (s === 'IN_PROGRESS' || s === 'IN_SERVICE') inProgress++;
       else if (s === 'COMPLETED') completed++;
@@ -368,8 +418,8 @@ export const Module02Bookings = ({
               className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500"
             >
               <option value="ALL">All Categories</option>
-              {categories.map(c => (
-                <option key={c.serviceId || c.id} value={c.name}>{c.name}</option>
+              {uniqueCategoryOptions.map((c, idx) => (
+                <option key={c.serviceId || c.id || `${c.name}-${idx}`} value={c.name}>{c.name}</option>
               ))}
             </select>
           </div>
@@ -515,8 +565,8 @@ export const Module02Bookings = ({
                               defaultValue=""
                             >
                               <option value="" disabled>+ Assign Partner</option>
-                              {workers.map(w => (
-                                <option key={w.workerId || w.id} value={w.workerId || w.id}>
+                              {workers.map((w, idx) => (
+                                <option key={w.workerId || w.id || idx} value={w.workerId || w.id}>
                                   {w.user?.fullName || w.fullName || 'Partner'}
                                 </option>
                               ))}
@@ -566,7 +616,7 @@ export const Module02Bookings = ({
                               defaultValue=""
                             >
                               <option value="" disabled>Update...</option>
-                              {status === 'SEARCHING' && <option value="ASSIGNED">Mark Assigned</option>}
+                              {(status === 'SEARCHING' || status === 'WORKER_NOT_FOUND' || status === 'PENDING') && <option value="ASSIGNED">Mark Assigned</option>}
                               {status === 'ASSIGNED' && <option value="IN_PROGRESS">Start Service</option>}
                               <option value="COMPLETED">Mark Complete</option>
                               <option value="CANCELLED">Cancel Order</option>
@@ -620,7 +670,7 @@ export const Module02Bookings = ({
                   <div>
                     <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Customer Verification PIN</span>
                     <div className="text-xl font-mono font-black text-white mt-0.5 tracking-widest">
-                      {selectedBooking.pinCode || '4821'}
+                      {selectedBooking.pinCode && selectedBooking.pinCode !== '-' ? selectedBooking.pinCode : '0000'}
                     </div>
                   </div>
                 </div>
@@ -682,8 +732,8 @@ export const Module02Bookings = ({
                         defaultValue=""
                       >
                         <option value="" disabled>Choose Partner to Dispatch...</option>
-                        {workers.map(w => (
-                          <option key={w.workerId || w.id} value={w.workerId || w.id}>
+                        {workers.map((w, idx) => (
+                          <option key={w.workerId || w.id || idx} value={w.workerId || w.id}>
                             {w.user?.fullName || w.fullName}
                           </option>
                         ))}
@@ -700,19 +750,19 @@ export const Module02Bookings = ({
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
                   <span>Base Service Charge ({selectedBooking.serviceName})</span>
-                  <span className="font-mono">₹{selectedBooking.totalAmount || 499}</span>
+                  <span className="font-mono">₹{selectedBooking.baseAmount || selectedBooking.totalAmount || 0}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
                   <span>Platform Conveniencing Fee & Taxes</span>
-                  <span className="font-mono">₹49</span>
+                  <span className="font-mono">₹{selectedBooking.extraAmount || 49}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-400 text-[11px]">
                   <span>Payment Mode</span>
-                  <span className="font-semibold text-white">{selectedBooking.paymentMethod || 'CASH_ON_DELIVERY'}</span>
+                  <span className="font-semibold text-white">{selectedBooking.paymentMethod || 'COD'}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-bold text-white">
                   <span>Total Amount Paid / Payable</span>
-                  <span className="text-blue-400 font-mono text-base">₹{(Number(selectedBooking.totalAmount || 499) + 49).toLocaleString('en-IN')}</span>
+                  <span className="text-blue-400 font-mono text-base">₹{(Number(selectedBooking.totalAmount || selectedBooking.baseAmount || 0) + Number(selectedBooking.extraAmount || 49)).toLocaleString('en-IN')}</span>
                 </div>
               </div>
 

@@ -5,9 +5,9 @@ import {
   Edit, Tag, Gift, Layers
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { createBanner, toggleBanner, uploadBannerImage } from '../api/adminApi';
+import { createBanner, toggleBanner, uploadBannerImage, deleteBanner } from '../api/adminApi';
 
-export const BANNER_CAMPAIGN_PRESETS = [
+const BANNER_CAMPAIGN_PRESETS = [
   {
     title: 'Festival Home Cleaning Fest — Flat 25% Off',
     targetType: 'SERVICE',
@@ -101,15 +101,23 @@ export const Module10Banners = ({ banners = [], setBanners, categories = [], onR
     }
   };
 
-  const handleDeleteBanner = (bannerId) => {
+  const handleDeleteBanner = async (bannerId) => {
     if (!window.confirm('Are you sure you want to remove this banner?')) return;
     setBanners(prev => {
       const updated = prev.filter(b => (b.bannerId || b.id) !== bannerId);
       localStorage.setItem('homeease_admin_banners', JSON.stringify(updated));
       return updated;
     });
-    setAlertMsg({ type: 'success', text: 'Banner removed successfully.' });
-    setTimeout(() => setAlertMsg(null), 3000);
+    try {
+      await deleteBanner(bannerId);
+      setAlertMsg({ type: 'success', text: 'Banner removed successfully from server.' });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Backend banner delete note:', err.message);
+      setAlertMsg({ type: 'success', text: 'Banner removed locally.' });
+    } finally {
+      setTimeout(() => setAlertMsg(null), 3000);
+    }
   };
 
   const handleOpenCreate = () => {
@@ -288,8 +296,8 @@ export const Module10Banners = ({ banners = [], setBanners, categories = [], onR
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredBanners.map((ban) => {
-            const bId = ban.bannerId || ban.id;
+          {filteredBanners.map((ban, idx) => {
+            const bId = ban.bannerId || ban.id || `banner-${idx}`;
             const isActive = ban.isActive !== undefined ? ban.isActive : (ban.status === 'Active');
             const targetCategory = categories.find(c => (c.serviceId || c.id) === ban.targetId);
             const targetName = ban.targetType === 'COUPON'
@@ -506,8 +514,8 @@ export const Module10Banners = ({ banners = [], setBanners, categories = [], onR
                       onChange={(e) => setTargetId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 outline-none focus:border-purple-600 focus:bg-white cursor-pointer"
                     >
-                      {categories.map(c => (
-                        <option key={c.serviceId || c.id} value={c.serviceId || c.id}>
+                      {categories.map((c, idx) => (
+                        <option key={c.serviceId || c.id || `${c.name}-${idx}`} value={c.serviceId || c.id}>
                           {c.name}
                         </option>
                       ))}

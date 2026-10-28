@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  CreditCard, IndianRupee, ArrowUpRight, CheckCircle2, 
-  AlertTriangle, RefreshCw, Filter, Search, Download, ShieldCheck, X, Loader2
-} from 'lucide-react';
+import { Search, Download, X } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { updatePaymentStatus } from '../api/adminApi';
 
@@ -153,8 +150,8 @@ export const Module09Financials = ({ ledger = [], setLedger, onRefresh }) => {
                   </td>
                 </tr>
               ) : (
-                filteredLedger.map(item => {
-                  const pId = item.paymentId || item.id;
+                filteredLedger.map((item, idx) => {
+                  const pId = item.paymentId || item.id || `p-${idx}`;
                   const bId = item.bookingId || item.jobRef || 'Booking';
                   const custName = item.customerName || item.customer || 'Customer';
                   const custPhone = item.customerPhone || 'N/A';

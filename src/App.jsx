@@ -17,7 +17,7 @@ import {
   getLiveMap,
   getBookings,
   getNotifications,
-  checkServerHealth
+  clearAdminToken
 } from './api/adminApi';
 
 // Import Module Views
@@ -35,14 +35,15 @@ import { ModuleAnalytics } from './views/ModuleAnalytics';
 import { Module10Banners } from './views/Module10Banners';
 import { Module11Promotions } from './views/Module11Promotions';
 import { Module12Notifications } from './views/Module12Notifications';
-
-const DEFAULT_BANNERS = [];
-const DEFAULT_NOTIFICATIONS = [];
+import { Module13Settings } from './views/Module13Settings';
+import { Module14ServiceAreas } from './views/Module14ServiceAreas';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    // Session-based auth: Opening localhost initially asks for login
-    return sessionStorage.getItem('homeease_admin_authenticated') === 'true';
+    return (
+      sessionStorage.getItem('homeease_admin_authenticated') === 'true' ||
+      localStorage.getItem('homeease_admin_authenticated') === 'true'
+    );
   });
   const [activeModule, setActiveModule] = useState('dashboard');
   const [currentRole, setCurrentRole] = useState(ADMIN_ROLES[0]);
@@ -56,7 +57,10 @@ export default function App() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('homeease_admin_authenticated');
+    sessionStorage.removeItem('homeease_admin_user');
     localStorage.removeItem('homeease_admin_authenticated');
+    localStorage.removeItem('homeease_admin_user');
+    clearAdminToken();
     setIsAuthenticated(false);
     setActiveModule('dashboard');
   };
@@ -81,45 +85,9 @@ export default function App() {
     activeBookings: []
   });
   const [ledger, setLedger] = useState([]);
-  const [bookings, setBookings] = useState(() => {
-    const cached = localStorage.getItem('homeease_admin_bookings');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) {}
-    }
-    return [];
-  });
-  const [banners, setBanners] = useState(() => {
-    const cached = localStorage.getItem('homeease_admin_banners');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          // Remove any dummy/preset banners, keep only real ones user adds
-          const userOnly = parsed.filter(b => 
-            !b.bannerId?.startsWith('b00') && 
-            !b.id?.startsWith('b00') &&
-            !b.title?.includes('Festival Home Cleaning Fest') &&
-            !b.title?.includes('Festive Home Deep Cleaning') &&
-            !b.title?.includes('Beat the Summer Heat') &&
-            !b.title?.includes('Weekend Wellness') &&
-            !b.title?.includes('Welcome to HomeEase') &&
-            !b.title?.includes('Quick Emergency Repairs')
-          );
-          localStorage.setItem('homeease_admin_banners', JSON.stringify(userOnly));
-          return userOnly;
-        }
-      } catch (e) {}
-    }
-    localStorage.setItem('homeease_admin_banners', JSON.stringify([]));
-    return [];
-  });
-  const [promotions, setPromotions] = useState(() => {
-    localStorage.removeItem('homeease_admin_coupons');
-    return [];
-  });
+  const [bookings, setBookings] = useState([]);
+  const [banners, setBanners] = useState([]);
+  const [promotions, setPromotions] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [securitySettings, setSecuritySettings] = useState(DEFAULT_SECURITY_SETTINGS);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -205,17 +173,11 @@ export default function App() {
       // 8. Promotional Banners
       try {
         const bList = await getBanners(false);
-        if (Array.isArray(bList) && bList.length > 0) {
+        if (Array.isArray(bList)) {
           setBanners(bList);
-          localStorage.setItem('homeease_admin_banners', JSON.stringify(bList));
-        } else {
-          const cached = localStorage.getItem('homeease_admin_banners');
-          if (cached) setBanners(JSON.parse(cached));
         }
       } catch (err) {
-        console.warn('Banners fetch error (fallback to cache):', err.message);
-        const cached = localStorage.getItem('homeease_admin_banners');
-        if (cached) setBanners(JSON.parse(cached));
+        console.warn('Banners fetch error:', err.message);
       }
 
       // 9. Coupons & Discounts
@@ -258,10 +220,21 @@ export default function App() {
     }
   }, []);
 
-  // Fetch initial data on mount
+  // Fetch initial data on mount and auto-poll every 10 seconds for real-time customer bookings
   useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
     syncAllLiveData();
-  }, [syncAllLiveData]);
+
+    const intervalId = setInterval(() => {
+      // Background poll: automatically pull fresh orders and active bookings
+      if (typeof document === 'undefined' || !document.hidden) {
+        syncAllLiveData();
+      }
+    }, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated, syncAllLiveData]);
 
   const handleOmniSearch = (query) => {
     if (!query) return;
@@ -270,6 +243,7 @@ export default function App() {
     else if (q.includes('worker') || q.includes('partner')) setActiveModule('workers');
     else if (q.includes('customer') || q.includes('user')) setActiveModule('customers');
     else if (q.includes('dispatch') || q.includes('map')) setActiveModule('dispatch');
+    else if (q.includes('service area') || q.includes('pincode') || q.includes('postal code')) setActiveModule('service-areas');
     else if (q.includes('category') || q.includes('service')) setActiveModule('categories');
     else if (q.includes('rate') || q.includes('sub-service')) setActiveModule('sub-services');
     else if (q.includes('payout') || q.includes('payment') || q.includes('gross') || q.includes('finance')) setActiveModule('payments');
@@ -396,6 +370,8 @@ export default function App() {
             />
           )}
 
+          {activeModule === 'service-areas' && <Module14ServiceAreas />}
+
           {activeModule === 'sub-services' && (
             <Module08SubServices 
               subServices={subServices} 
@@ -448,6 +424,13 @@ export default function App() {
               notifications={notifications} 
               setNotifications={setNotifications}
               onRefresh={syncAllLiveData}
+            />
+          )}
+
+          {activeModule === 'settings' && (
+            <Module13Settings
+              securitySettings={securitySettings}
+              setSecuritySettings={setSecuritySettings}
             />
           )}
         </main>

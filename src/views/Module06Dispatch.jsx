@@ -141,9 +141,9 @@ export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
               </div>
             ) : (
               <div className="space-y-2.5 max-h-96 overflow-y-auto">
-                {activeBookings.map((b) => (
+                {activeBookings.map((b, idx) => (
                   <div 
-                    key={b.bookingId}
+                    key={b.bookingId || `booking-${idx}`}
                     onClick={() => setSelectedItem({ type: 'booking', data: b })}
                     className="p-3 rounded-xl border border-slate-200 hover:border-blue-400 transition cursor-pointer bg-slate-50/50 space-y-1"
                   >

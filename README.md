@@ -59,7 +59,7 @@ The **Home Ease Admin Portal** provides platform administrators, dispatchers, an
 3. Configure Environment Variables:
    Create a `.env` file in the root directory:
    ```env
-   VITE_API_BASE_URL=http://localhost:8080/api
+   VITE_API_BASE_URL=http://localhost:8080/api/v1/admin
    ```
 
 4. Start the development server:
@@ -76,6 +76,10 @@ The **Home Ease Admin Portal** provides platform administrators, dispatchers, an
    ```bash
    npm run preview
    ```
+
+### Service Area Management
+
+The **Services → Service Areas** screen connects to the admin service-area endpoints for state, city, and pincode management. It requires the admin login response to include the authenticated admin's `userId` (or `id` under `user`/`admin`) so the frontend can send the required `X-User-Id` header alongside the saved bearer token. Pincode search and filters are paginated; state, city, and pincode deactivation warnings require a second confirmation before the update is submitted.
 
 ---
 

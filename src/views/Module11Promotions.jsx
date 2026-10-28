@@ -4,7 +4,7 @@ import {
   Trash2, Search, X, Sparkles, Clock, Loader2, Copy, Check
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { createCoupon } from '../api/adminApi';
+import { createCoupon, deleteCoupon } from '../api/adminApi';
 
 export const Module11Promotions = ({ promotions = [], setPromotions, onRefresh }) => {
   const [showAddPromo, setShowAddPromo] = useState(false);
@@ -37,14 +37,23 @@ export const Module11Promotions = ({ promotions = [], setPromotions, onRefresh }
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  const handleDeleteCoupon = (couponId) => {
+  const handleDeleteCoupon = async (couponId) => {
+    if (!window.confirm('Are you sure you want to remove this coupon?')) return;
     setPromotions(prev => {
       const updated = prev.filter(p => (p.couponId || p.id) !== couponId);
       localStorage.setItem('homeease_admin_coupons', JSON.stringify(updated));
       return updated;
     });
-    setAlertMsg({ type: 'success', text: 'Coupon removed successfully.' });
-    setTimeout(() => setAlertMsg(null), 3000);
+    try {
+      await deleteCoupon(couponId);
+      setAlertMsg({ type: 'success', text: 'Coupon removed successfully from live catalog!' });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Backend coupon delete note:', err.message);
+      setAlertMsg({ type: 'success', text: 'Coupon removed locally.' });
+    } finally {
+      setTimeout(() => setAlertMsg(null), 3000);
+    }
   };
 
   const handleCreateCoupon = async (e) => {
@@ -177,8 +186,8 @@ export const Module11Promotions = ({ promotions = [], setPromotions, onRefresh }
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredPromos.map((promo) => {
-            const id = promo.couponId || promo.id;
+          {filteredPromos.map((promo, idx) => {
+            const id = promo.couponId || promo.id || `promo-${idx}`;
             const code = promo.code;
             const discType = promo.discountType || 'PERCENTAGE';
             const discVal = promo.discountVal ?? 0;

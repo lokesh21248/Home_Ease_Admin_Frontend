@@ -601,8 +601,8 @@ export const Module04Workers = ({ workers = [], setWorkers, onRefresh }) => {
                   </td>
                 </tr>
               )}
-              {filteredWorkers.map((w) => {
-                const id = w.workerId || w.id;
+              {filteredWorkers.map((w, idx) => {
+                const id = w.workerId || w.id || `worker-${idx}`;
                 const isChecked = selectedIds.includes(id);
 
                 return (

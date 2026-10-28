@@ -37,7 +37,6 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
   // Form State
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [targetAudience, setTargetAudience] = useState('All Users');
   const [selectedPresetId, setSelectedPresetId] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
@@ -48,11 +47,16 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
 
   // Modal State for "+ Create Notification"
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [modalAudience, setModalAudience] = useState('All Users');
+  const [modalRecipientType, setModalRecipientType] = useState('broadcast');
+  const [modalRecipientId, setModalRecipientId] = useState('');
   const [modalType, setModalType] = useState('instant'); // instant | scheduled
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
-  const [modalScheduledAt, setModalScheduledAt] = useState('2026-10-01T08:00');
+  const [modalScheduledAt, setModalScheduledAt] = useState(() => {
+    const scheduledAt = new Date(Date.now() + 60 * 60 * 1000);
+    scheduledAt.setMinutes(scheduledAt.getMinutes() - scheduledAt.getTimezoneOffset());
+    return scheduledAt.toISOString().slice(0, 16);
+  });
   const [isModalSubmitting, setIsModalSubmitting] = useState(false);
 
   // Filtered History
@@ -81,24 +85,19 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
     setIsSending(true);
     setAlertMsg(null);
 
-    const payload = {
-      recipientUserId: null,
-      title: title.trim(),
-      body: body.trim(),
-    };
-
     try {
-      try {
-        await sendInstantNotification(payload);
-      } catch (err) {
-        console.warn('Backend notification notice:', err.message);
-      }
+      const payload = {
+        recipientUserId: null,
+        title: title.trim(),
+        body: body.trim(),
+      };
+      await sendInstantNotification(payload);
 
       const newNotif = {
         id: `notif-${Date.now()}`,
         title: payload.title,
         body: payload.body,
-        target: targetAudience || 'All Users',
+        target: 'All Users',
         status: 'Delivered',
         sentTime: 'Just Now',
         iconType: 'promo',
@@ -115,9 +114,11 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
       setBody('');
       setSelectedPresetId(null);
       setAlertMsg({ type: 'success', text: 'Broadcast message successfully dispatched to all mobile devices!' });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setAlertMsg({ type: 'error', text: `Failed to send notification: ${err.message}` });
     } finally {
       setIsSending(false);
-      setTimeout(() => setAlertMsg(null), 4000);
     }
   };
 
@@ -130,25 +131,30 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
     setAlertMsg(null);
 
     try {
+      if (modalRecipientType !== 'broadcast' && !modalRecipientId.trim()) {
+        throw new Error('Enter a recipient ID or choose broadcast.');
+      }
+
+      const recipientId = modalRecipientId.trim();
+      const target = modalRecipientType === 'broadcast'
+        ? 'All Users'
+        : `${modalRecipientType === 'worker' ? 'Worker' : 'User'}: ${recipientId}`;
+
       if (modalType === 'instant') {
-        try {
-          await sendInstantNotification({
-            recipientUserId: null,
-            title: modalTitle.trim(),
-            body: modalMessage.trim(),
-          });
-        } catch (err) {
-          console.warn('Backend notification notice:', err.message);
-        }
+        await sendInstantNotification({
+          recipientUserId: modalRecipientType === 'user' ? recipientId : null,
+          title: modalTitle.trim(),
+          body: modalMessage.trim(),
+        });
 
         const newNotif = {
           id: `notif-${Date.now()}`,
           title: modalTitle.trim(),
           body: modalMessage.trim(),
-          target: modalAudience,
+          target,
           status: 'Delivered',
           sentTime: 'Just Now',
-          iconType: modalAudience === 'Partner Users' ? 'alert' : 'promo',
+          iconType: modalRecipientType === 'worker' ? 'alert' : 'promo',
         };
 
         setNotifications(prev => {
@@ -157,24 +163,20 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
           return updated;
         });
       } else {
-        try {
-          await scheduleNotification({
-            recipientUserId: null,
-            recipientWorkerId: null,
-            title: modalTitle.trim(),
-            message: modalMessage.trim(),
-            type: 'PROMOTION',
-            scheduledAt: modalScheduledAt.includes('T') ? `${modalScheduledAt}:00Z` : `${modalScheduledAt}T08:00:00Z`,
-          });
-        } catch (err) {
-          console.warn('Backend notification notice:', err.message);
-        }
+        await scheduleNotification({
+          recipientUserId: modalRecipientType === 'user' ? recipientId : null,
+          recipientWorkerId: modalRecipientType === 'worker' ? recipientId : null,
+          title: modalTitle.trim(),
+          message: modalMessage.trim(),
+          type: 'PROMOTION',
+          scheduledAt: new Date(modalScheduledAt).toISOString(),
+        });
 
         const newNotif = {
           id: `sched-${Date.now()}`,
           title: modalTitle.trim(),
           body: modalMessage.trim(),
-          target: modalAudience,
+          target,
           status: 'Scheduled',
           sentTime: `Scheduled for ${modalScheduledAt.replace('T', ' ')}`,
           iconType: 'campaign',
@@ -190,10 +192,14 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
       setShowCreateModal(false);
       setModalTitle('');
       setModalMessage('');
+      setModalRecipientId('');
+      setModalRecipientType('broadcast');
       setAlertMsg({ type: 'success', text: 'Notification successfully processed and recorded!' });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setAlertMsg({ type: 'error', text: `Failed to process notification: ${err.message}` });
     } finally {
       setIsModalSubmitting(false);
-      setTimeout(() => setAlertMsg(null), 4000);
     }
   };
 
@@ -393,7 +399,7 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
                 No notifications match your search query.
               </div>
             ) : (
-              filteredNotifs.map((item) => {
+              filteredNotifs.map((item, idx) => {
                 const isScheduled = item.status === 'Scheduled' || item.type === 'SCHEDULED_CAMPAIGN';
                 const audience = item.target || item.recipientName || 'All Users';
                 const isMenuOpen = activeMenuId === (item.id || item.notificationId);
@@ -414,7 +420,7 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
                 }
 
                 return (
-                  <div key={item.id || item.notificationId} className="py-4 first:pt-2 last:pb-1 flex items-start gap-3.5 relative group">
+                  <div key={item.id || item.notificationId || `notif-${idx}`} className="py-4 first:pt-2 last:pb-1 flex items-start gap-3.5 relative group">
                     {/* Circle Avatar Icon */}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${avatarClass}`}>
                       <AvatarIcon className="w-4 h-4" />
@@ -517,7 +523,10 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setModalType('instant')}
+                    onClick={() => {
+                      setModalType('instant');
+                      setModalRecipientType((recipientType) => recipientType === 'worker' ? 'broadcast' : recipientType);
+                    }}
                     className={`py-2 rounded-xl font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
                       modalType === 'instant' 
                         ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs' 
@@ -540,19 +549,34 @@ export const Module12Notifications = ({ notifications = [], setNotifications, on
                 </div>
               </div>
 
-              {/* Target Audience Dropdown */}
+              {/* Recipient */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Target Audience</label>
+                <label className="block font-bold text-slate-700 mb-1">Recipient</label>
                 <select
-                  value={modalAudience}
-                  onChange={(e) => setModalAudience(e.target.value)}
+                  value={modalRecipientType}
+                  onChange={(e) => setModalRecipientType(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
                 >
-                  <option value="All Users">All Users (Mobile App Customers & Workers)</option>
-                  <option value="Customers">Customers Only</option>
-                  <option value="Partner Users">Partner Users (Workers & Fleet)</option>
+                  <option value="broadcast">Broadcast to all users</option>
+                  <option value="user">Specific user</option>
+                  {modalType === 'scheduled' && <option value="worker">Specific worker</option>}
                 </select>
               </div>
+              {modalRecipientType !== 'broadcast' && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    {modalRecipientType === 'worker' ? 'Worker ID' : 'User ID'}
+                  </label>
+                  <input
+                    type="text"
+                    value={modalRecipientId}
+                    onChange={(e) => setModalRecipientId(e.target.value)}
+                    placeholder={`Enter the ${modalRecipientType} UUID`}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                    required
+                  />
+                </div>
+              )}
 
               {/* Title */}
               <div>

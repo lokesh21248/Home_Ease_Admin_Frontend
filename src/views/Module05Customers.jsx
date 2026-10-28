@@ -1,14 +1,35 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Users, Shield, Search, Phone, Mail, Calendar, 
-  CheckCircle2, UserCheck, Eye, X, Copy, Check, Lock, ShieldCheck, Sparkles
+  CheckCircle2, UserCheck, Eye, X, Copy, Check, Lock, ShieldCheck, Sparkles, Loader2
 } from 'lucide-react';
+import { updateUserRole } from '../api/adminApi';
 
 export const Module05Customers = ({ customers = [], setCustomers, onRefresh }) => {
   const [activeTab, setActiveTab] = useState('customers'); // 'customers' | 'admins'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+  const [roleMessage, setRoleMessage] = useState(null);
+
+  const handleRoleChange = async (userId, targetRole) => {
+    setIsUpdatingRole(true);
+    setRoleMessage(null);
+    try {
+      await updateUserRole(userId, targetRole);
+      setCustomers(prev => prev.map(u => (u.userId === userId || u.id === userId) ? { ...u, role: targetRole } : u));
+      setSelectedUser(prev => prev ? { ...prev, role: targetRole } : null);
+      setRoleMessage({ type: 'success', text: `Role updated to ${targetRole} successfully!` });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Role update error:', err.message);
+      setRoleMessage({ type: 'error', text: `Failed to update role: ${err.message}` });
+    } finally {
+      setIsUpdatingRole(false);
+      setTimeout(() => setRoleMessage(null), 3000);
+    }
+  };
 
   // Partition users cleanly into Customers and Administrators
   const customerList = useMemo(() => {
@@ -175,8 +196,8 @@ export const Module05Customers = ({ customers = [], setCustomers, onRefresh }) =
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map(user => {
-                  const uId = user.userId || user.id || 'N/A';
+                filteredUsers.map((user, idx) => {
+                  const uId = user.userId || user.id || `user-${idx}`;
                   const name = user.fullName || user.name || (activeTab === 'customers' ? 'Customer User' : 'System Admin');
                   const email = user.email || 'No email provided';
                   const phone = user.phoneNumber || user.phone || 'N/A';
@@ -324,10 +345,25 @@ export const Module05Customers = ({ customers = [], setCustomers, onRefresh }) =
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 font-medium">Account Role:</span>
-                  <span className="font-bold text-slate-900 font-mono">
-                    {selectedUser.role || (activeTab === 'customers' ? 'CUSTOMER' : 'ADMIN')}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900 font-mono">
+                      {selectedUser.role || (activeTab === 'customers' ? 'CUSTOMER' : 'ADMIN')}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isUpdatingRole}
+                      onClick={() => handleRoleChange(selectedUser.userId || selectedUser.id, (selectedUser.role || '').toUpperCase() === 'ADMIN' ? 'CUSTOMER' : 'ADMIN')}
+                      className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[10px] border border-blue-200 transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isUpdatingRole ? 'Updating...' : ((selectedUser.role || '').toUpperCase() === 'ADMIN' ? 'Demote to Customer' : 'Promote to Admin')}
+                    </button>
+                  </div>
                 </div>
+                {roleMessage && (
+                  <div className={`p-2 rounded-lg text-[11px] font-semibold ${roleMessage.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                    {roleMessage.text}
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 font-medium">Email:</span>
                   <span className="font-semibold text-slate-700">{selectedUser.email || 'N/A'}</span>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, Clock, ShieldCheck, ShieldAlert, Zap, Radio } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Clock, Radio } from 'lucide-react';
 
 export const StatusBadge = ({ status, text }) => {
   const normalized = (status || text || '').toString().toUpperCase();
@@ -10,7 +10,7 @@ export const StatusBadge = ({ status, text }) => {
   if (['SUCCESS', 'APPROVED', 'VERIFIED', 'ACTIVE', 'ONLINE', 'COMPLETED', 'VIP'].some(k => normalized.includes(k))) {
     styles = 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm';
     Icon = CheckCircle2;
-  } else if (['PENDING', 'IN TRANSIT', 'IN PROGRESS', 'SCHEDULED', 'FLAGGED', 'WARNING', 'UNASSIGNED', 'SEARCHING'].some(k => normalized.includes(k))) {
+  } else if (['PENDING', 'IN TRANSIT', 'IN PROGRESS', 'SCHEDULED', 'FLAGGED', 'WARNING', 'UNASSIGNED', 'SEARCHING', 'WORKER_NOT_FOUND', 'NOT_FOUND'].some(k => normalized.includes(k))) {
     styles = 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm';
     Icon = AlertTriangle;
   } else if (['ASSIGNED', 'CONFIRMED', 'ACCEPTED'].some(k => normalized.includes(k))) {

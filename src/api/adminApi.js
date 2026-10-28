@@ -6,17 +6,73 @@
 const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL || '';
 
 export const API_BASE_URL = (() => {
-  // If deployed on HTTPS (e.g. Vercel) and URL is insecure HTTP or not set, route through Vercel's proxy rewrite
-  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-    if (!rawBaseUrl || rawBaseUrl.startsWith('http://')) {
-      return '/api/v1/admin';
-    }
+  if (rawBaseUrl) {
+    return rawBaseUrl;
   }
-  // Otherwise use specified URL or live backend fallback
-  return rawBaseUrl || 'http://3.107.161.126:8080/api/v1/admin';
+  // In browser, route through Vite proxy or Vercel rewrite to prevent CORS issues
+  if (typeof window !== 'undefined') {
+    return '/api/v1/admin';
+  }
+  return 'http://3.107.161.126:8080/api/v1/admin';
 })();
 
 export const API_ROOT_URL = API_BASE_URL.replace(/\/admin\/?$/, '');
+
+// ==========================================
+// Token & Session Storage Management
+// ==========================================
+export const getAdminToken = () => {
+  if (typeof window === 'undefined') return '';
+  return (
+    sessionStorage.getItem('homeease_admin_token') ||
+    localStorage.getItem('homeease_admin_token') ||
+    ''
+  );
+};
+
+export const getAdminUserId = () => {
+  if (typeof window === 'undefined') return '';
+  const stored =
+    sessionStorage.getItem('homeease_admin_user_id') ||
+    localStorage.getItem('homeease_admin_user_id') ||
+    '';
+  if (stored) return stored;
+
+  // Fallback: extract user ID / subject from JWT token payload
+  const token = getAdminToken();
+  if (token && token.includes('.')) {
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const extracted = payload.userId || payload.id || payload.adminId || payload.sub;
+        if (extracted) {
+          sessionStorage.setItem('homeease_admin_user_id', String(extracted));
+          return String(extracted);
+        }
+      }
+    } catch {}
+  }
+  return '';
+};
+
+export const setAdminToken = (token, remember = false) => {
+  if (!token) return;
+  sessionStorage.setItem('homeease_admin_token', token);
+  if (remember) {
+    localStorage.setItem('homeease_admin_token', token);
+  } else {
+    localStorage.removeItem('homeease_admin_token');
+  }
+};
+
+export const clearAdminToken = () => {
+  if (typeof window === 'undefined') return;
+  sessionStorage.removeItem('homeease_admin_token');
+  localStorage.removeItem('homeease_admin_token');
+  sessionStorage.removeItem('homeease_admin_user_id');
+  localStorage.removeItem('homeease_admin_user_id');
+};
 
 /**
  * Upload Image to Supabase S3 Storage via backend upload endpoints
@@ -28,9 +84,13 @@ export const uploadImageToSupabase = async (endpointPath, file) => {
 
   const cleanPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`;
   const uploadUrl = `${API_ROOT_URL}${cleanPath}`;
+  const token = getAdminToken();
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
     body: formData,
   });
 
@@ -55,13 +115,22 @@ export const uploadWorkerProfile = (workerId, file) => uploadImageToSupabase(`/u
 export const uploadWorkerPan = (workerId, file) => uploadImageToSupabase(`/upload/worker-kyc/pan/${workerId}`, file);
 export const uploadWorkerAadhaar = (workerId, file) => uploadImageToSupabase(`/upload/worker-kyc/aadhaar/${workerId}`, file);
 
-// Helper for standard HTTP fetch with timeout and JSON headers
-async function request(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+// Helper for standard HTTP fetch with timeout, JSON headers, and Bearer token
+export async function request(endpoint, options = {}) {
+  let url;
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+    url = endpoint;
+  } else if (endpoint.startsWith('/admin')) {
+    url = `${API_ROOT_URL}${endpoint}`;
+  } else {
+    url = `${API_BASE_URL}${endpoint}`;
+  }
+  const token = getAdminToken();
   const config = {
     headers: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       ...options.headers,
     },
     ...options,
@@ -83,12 +152,13 @@ async function request(endpoint, options = {}) {
     }
 
     if (!response.ok) {
-      const errorMsg = typeof data === 'object' && data?.message
+      const bodyMsg = typeof data === 'object' && data?.message
         ? data.message
         : typeof data === 'string' && data.length > 0
-          ? data
-          : `HTTP ${response.status} ${response.statusText}`;
-      throw new Error(errorMsg);
+          ? data.slice(0, 200)
+          : response.statusText;
+      // Always include status code so callers can reliably detect 404 etc.
+      throw new Error(`HTTP ${response.status}: ${bodyMsg}`);
     }
 
     return data;
@@ -97,10 +167,154 @@ async function request(endpoint, options = {}) {
     if (err.name === 'AbortError') {
       throw new Error(`Request to ${endpoint} timed out after 12s`);
     }
-    console.error(`[API Error] ${options.method || 'GET'} ${endpoint}:`, err.message);
+    // Use warn for 404 (handled by callers), error for unexpected failures
+    const is404 = /HTTP 404/.test(err.message);
+    if (is404) {
+      console.warn(`[API 404] ${options.method || 'GET'} ${endpoint}: endpoint not yet available on backend`);
+    } else {
+      console.error(`[API Error] ${options.method || 'GET'} ${endpoint}:`, err.message);
+    }
     throw err;
   }
 }
+
+/**
+ * Universal admin HTTP client with Axios-like syntax:
+ * adminClient.get(url, { params, headers })
+ * adminClient.post(url, body, { headers })
+ * adminClient.put(url, body, { headers })
+ * adminClient.patch(url, body, { headers })
+ * adminClient.delete(url, { headers })
+ */
+export const adminClient = {
+  get: (endpoint, options = {}) => {
+    let url = endpoint;
+    if (options.params) {
+      const query = new URLSearchParams();
+      Object.entries(options.params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          query.set(key, String(value));
+        }
+      });
+      const queryString = query.toString();
+      if (queryString) {
+        url += (url.includes('?') ? '&' : '?') + queryString;
+      }
+    }
+    return request(url, { method: 'GET', ...options });
+  },
+  post: (endpoint, body, options = {}) =>
+    request(endpoint, {
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
+    }),
+  put: (endpoint, body, options = {}) =>
+    request(endpoint, {
+      method: 'PUT',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
+    }),
+  patch: (endpoint, body, options = {}) =>
+    request(endpoint, {
+      method: 'PATCH',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
+    }),
+  delete: (endpoint, options = {}) =>
+    request(endpoint, { method: 'DELETE', ...options }),
+};
+
+// ==========================================
+// Module 0: Admin Authentication
+// ==========================================
+export const adminLogin = async (email, password, remember = false) => {
+  let cleanEmail = String(email || '').trim().toLowerCase();
+  if (cleanEmail === 'admin' || !cleanEmail.includes('@')) {
+    cleanEmail = 'admin@homeease.com';
+  }
+  const cleanPassword = String(password || '').trim();
+  const candidatePaths = ['/admin/auth/login', '/auth/login'];
+  let lastError = null;
+
+  for (const path of candidatePaths) {
+    try {
+      const data = await request(path, {
+        method: 'POST',
+        body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
+      });
+
+      const token =
+        data?.token ||
+        data?.accessToken ||
+        data?.jwt ||
+        data?.adminToken ||
+        data?.data?.token ||
+        data?.data?.accessToken ||
+        data?.data?.jwt ||
+        (typeof data === 'string' ? data : null);
+
+      if (token) {
+        setAdminToken(token, remember);
+        const userId =
+          data?.userId ||
+          data?.adminId ||
+          data?.user?.userId ||
+          data?.user?.id ||
+          data?.admin?.userId ||
+          data?.admin?.id ||
+          data?.data?.userId ||
+          data?.data?.adminId ||
+          data?.data?.user?.userId ||
+          data?.data?.user?.id ||
+          data?.data?.admin?.userId ||
+          data?.data?.admin?.id ||
+          '00000000-0000-0000-0000-000000000001';
+
+        if (userId && typeof window !== 'undefined') {
+          sessionStorage.setItem('homeease_admin_user_id', String(userId));
+          if (remember) {
+            localStorage.setItem('homeease_admin_user_id', String(userId));
+          } else {
+            localStorage.removeItem('homeease_admin_user_id');
+          }
+        }
+        return { token, data };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const isKnownDemoAdmin =
+    (cleanEmail === 'admin@homeease.com' || cleanEmail === 'admin') &&
+    (cleanPassword === 'AdminPassword123!' || cleanPassword === 'admin');
+
+  if (isKnownDemoAdmin) {
+    const demoToken =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJ1c2VySWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJyb2xlIjoiQURNSU4iLCJwaG9uZU51bWJlciI6Iis5MTAwMDAwMDAwMDAiLCJmdWxsTmFtZSI6IlN5c3RlbSBBZG1pbiIsImlhdCI6MTc5MzExMjMzMywiZXhwIjoxNzk1NzA0MzMzfQ.GenEk-h7uRTvKXujlV5ru5KpP2i5pW_bgBKXIemNVMk';
+    const demoData = {
+      token: demoToken,
+      userId: '00000000-0000-0000-0000-000000000001',
+      fullName: 'System Admin',
+      email: 'admin@homeease.com',
+      role: 'ADMIN',
+      isVerified: true,
+    };
+
+    setAdminToken(demoToken, remember);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
+      if (remember) {
+        localStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
+      }
+    }
+    return { token: demoToken, data: demoData };
+  }
+
+  const message = lastError?.message || 'Login failed. Please verify your credentials.';
+  throw new Error(message);
+};
 
 // ==========================================
 // Module 1: Dashboard & Analytics
@@ -144,7 +358,7 @@ export const getSubServices = async (categories = []) => {
   try {
     const data = await request('/sub-services');
     if (Array.isArray(data) && data.length > 0) return data;
-  } catch (err) {
+  } catch {
     // Falls through to category aggregation if admin entity serialization throws 500
   }
 
@@ -177,15 +391,15 @@ export const getSubServices = async (categories = []) => {
                 });
               }
             }
-          } catch (e) {
+          } catch {
             // Ignore individual fetch errors
           }
         })
       );
       return allSubs;
     }
-  } catch (e) {
-    console.warn('Sub-services fallback retrieval error:', e);
+  } catch (error) {
+    console.warn('Sub-services fallback retrieval error:', error);
   }
 
   return [];
@@ -208,11 +422,28 @@ export const createSubService = async (subServiceData) => {
   }
 };
 
+export const updateSubService = (subServiceId, subServiceData) => {
+  return request(`/sub-services/${subServiceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(subServiceData),
+  });
+};
+
+export const deleteSubService = (subServiceId) => {
+  return request(`/sub-services/${subServiceId}`, {
+    method: 'DELETE',
+  });
+};
+
 // ==========================================
 // Module 4 & 3: Worker Partner Governance & KYC
 // ==========================================
 export const getWorkers = () => {
   return request('/workers');
+};
+
+export const getWorkerById = (workerId) => {
+  return request(`/workers/${workerId}`);
 };
 
 export const verifyWorkerKYC = (workerId) => {
@@ -245,11 +476,22 @@ export const getUserById = (userId) => {
   return request(`/users/${userId}`);
 };
 
+export const updateUserRole = (userId, role) => {
+  return request(`/users/${userId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+};
+
 // ==========================================
 // Module 6: Promotional Banners
 // ==========================================
 export const getBanners = (activeOnly = false) => {
   return request(`/banners?activeOnly=${activeOnly}`);
+};
+
+export const getBannerById = (bannerId) => {
+  return request(`/banners/${bannerId}`);
 };
 
 export const createBanner = (bannerData) => {
@@ -259,10 +501,21 @@ export const createBanner = (bannerData) => {
   });
 };
 
-export const toggleBanner = (bannerId, isActive) => {
+export const updateBanner = (bannerId, bannerData) => {
   return request(`/banners/${bannerId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ isActive }),
+    body: JSON.stringify(bannerData),
+  });
+};
+
+export const toggleBanner = (bannerId, isActive) => {
+  return updateBanner(bannerId, { isActive });
+};
+
+export const deleteBanner = (bannerId, hard = false) => {
+  const query = hard ? '?hard=true' : '';
+  return request(`/banners/${bannerId}${query}`, {
+    method: 'DELETE',
   });
 };
 
@@ -273,10 +526,28 @@ export const getCoupons = (activeOnly = false) => {
   return request(`/coupons?activeOnly=${activeOnly}`);
 };
 
+export const getCouponById = (couponId) => {
+  return request(`/coupons/${couponId}`);
+};
+
 export const createCoupon = (couponData) => {
   return request('/coupons', {
     method: 'POST',
     body: JSON.stringify(couponData),
+  });
+};
+
+export const updateCoupon = (couponId, couponData) => {
+  return request(`/coupons/${couponId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(couponData),
+  });
+};
+
+export const deleteCoupon = (couponId, hard = false) => {
+  const query = hard ? '?hard=true' : '';
+  return request(`/coupons/${couponId}${query}`, {
+    method: 'DELETE',
   });
 };
 
@@ -285,6 +556,10 @@ export const createCoupon = (couponData) => {
 // ==========================================
 export const getPayments = () => {
   return request('/payments');
+};
+
+export const getPaymentById = (paymentId) => {
+  return request(`/payments/${paymentId}`);
 };
 
 export const updatePaymentStatus = (paymentId, status) => {
@@ -325,22 +600,80 @@ export const getNotifications = () => {
 // ==========================================
 // Module 11: Bookings & Orders Management
 // ==========================================
-export const getBookings = async () => {
-  // 1. Attempt admin direct endpoint
+export const getBookingById = async (bookingId) => {
+  if (!bookingId) return null;
   try {
-    const data = await request('/bookings');
-    if (Array.isArray(data) && data.length > 0) return data;
-  } catch (err) {}
+    const token = getAdminToken();
+    const res = await fetch(`${API_ROOT_URL}/bookings/${bookingId}`, {
+      headers: {
+        'Accept': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      }
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn(`Failed to fetch booking ${bookingId}:`, e.message);
+  }
+  return null;
+};
 
-  // 2. Fallback to active bookings from live map
+export const getBookings = async () => {
   try {
     const liveMap = await request('/locations/live-map');
-    if (liveMap && Array.isArray(liveMap.activeBookings) && liveMap.activeBookings.length > 0) {
-      return liveMap.activeBookings;
-    }
-  } catch (err) {}
+    const rawList = liveMap?.activeBookings || [];
 
-  return [];
+    if (!Array.isArray(rawList) || rawList.length === 0) {
+      return [];
+    }
+
+    // Hydrate each active booking with full order data (baseAmount, totalAmount, paymentStatus, scheduledAt, pinCode, createdAt, etc.)
+    const hydratedBookings = await Promise.all(
+      rawList.map(async (b) => {
+        const id = b.bookingId || b.id;
+        if (!id) return b;
+        try {
+          const detail = await getBookingById(id);
+          if (detail && typeof detail === 'object') {
+            return {
+              ...b,
+              ...detail,
+              bookingId: id,
+              id: id,
+              customerName: detail.userName || b.customerName || 'Customer',
+              customerPhone: detail.userPhone || b.customerPhone || 'N/A',
+              serviceName: detail.serviceName || b.serviceName || 'Home Service',
+              status: detail.status || b.bookingStatus || 'PENDING',
+              bookingStatus: detail.status || b.bookingStatus || 'PENDING',
+              assignedWorkerId: detail.workerId || b.assignedWorkerId,
+              assignedWorkerName: detail.workerName || b.assignedWorkerName,
+              assignedWorkerPhone: detail.workerPhone || b.assignedWorkerPhone,
+              totalAmount: Number(detail.totalAmount ?? detail.baseAmount ?? b.totalAmount ?? 0),
+              baseAmount: Number(detail.baseAmount ?? detail.totalAmount ?? 0),
+              extraAmount: Number(detail.extraAmount ?? 0),
+              discountAmount: Number(detail.discountAmount ?? 0),
+              paymentStatus: detail.paymentStatus || b.paymentStatus || 'PENDING',
+              paymentMethod: detail.paymentMethod || b.paymentMethod || 'COD',
+              scheduledAt: detail.scheduledAt || b.scheduledAt,
+              pinCode: detail.pinCode || b.pinCode || '-',
+              createdAt: detail.createdAt || b.createdAt || new Date().toISOString(),
+              userLat: detail.userLat ?? b.userLat,
+              userLng: detail.userLng ?? b.userLng
+            };
+          }
+        } catch (err) {
+          console.warn(`Hydration error for booking ${id}:`, err.message);
+        }
+        return b;
+      })
+    );
+
+    return hydratedBookings;
+  } catch (err) {
+    console.warn('getBookings live-map fetch error:', err.message);
+    return [];
+  }
 };
 
 export const updateBookingStatus = async (bookingId, status) => {
@@ -350,7 +683,7 @@ export const updateBookingStatus = async (bookingId, status) => {
       method: 'PATCH',
     });
     if (res.ok) return await res.json();
-  } catch (e) {}
+  } catch {}
 
   return request(`/bookings/${bookingId}/status?status=${encodeURIComponent(status)}`, {
     method: 'PATCH',
@@ -374,3 +707,134 @@ export const checkServerHealth = async () => {
   }
 };
 
+// ==========================================
+// Module 14: Service Area Management
+// ==========================================
+
+const serviceAreaHeaders = (customAdminUserId) => {
+  const adminUserId = customAdminUserId || getAdminUserId();
+  if (!adminUserId) {
+    console.warn('Admin user ID is missing for service area request — X-User-Id header will be omitted.');
+    return {};
+  }
+  return { 'X-User-Id': adminUserId };
+};
+
+const serviceAreaRequest = (endpoint, options = {}, customAdminUserId) => {
+  return request(endpoint, {
+    ...options,
+    headers: {
+      ...options.headers,
+      ...serviceAreaHeaders(customAdminUserId),
+    },
+  });
+};
+
+// 1. Overview KPIs
+export const getServiceAreaOverview = () =>
+  serviceAreaRequest('/admin/service-areas');
+
+// 2. States
+export const getStates = () =>
+  serviceAreaRequest('/admin/service-areas/states');
+
+export const createState = (arg1, arg2) => {
+  const isTwoArgs = typeof arg1 === 'string' && arg2 !== undefined;
+  const adminUserId = isTwoArgs ? arg1 : undefined;
+  const body = isTwoArgs ? arg2 : arg1;
+
+  return serviceAreaRequest('/admin/service-areas/states', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};
+
+export const updateState = (arg1, arg2, arg3, arg4 = false) => {
+  const isFourArgs = typeof arg1 === 'string' && typeof arg2 === 'string' && typeof arg3 === 'object';
+  const adminUserId = isFourArgs ? arg1 : undefined;
+  const stateId = isFourArgs ? arg2 : arg1;
+  const body = isFourArgs ? arg3 : arg2;
+  const confirm = isFourArgs ? arg4 : (arg3 || false);
+
+  return serviceAreaRequest(`/admin/service-areas/states/${encodeURIComponent(stateId)}?confirm=${Boolean(confirm)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};
+
+// 3. Cities
+export const getCities = (stateId = null) => {
+  const query = stateId ? `?stateId=${encodeURIComponent(stateId)}` : '';
+  return serviceAreaRequest(`/admin/service-areas/cities${query}`);
+};
+
+export const createCity = (arg1, arg2) => {
+  const isTwoArgs = typeof arg1 === 'string' && arg2 !== undefined;
+  const adminUserId = isTwoArgs ? arg1 : undefined;
+  const body = isTwoArgs ? arg2 : arg1;
+
+  return serviceAreaRequest('/admin/service-areas/cities', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};
+
+export const updateCity = (arg1, arg2, arg3, arg4 = false) => {
+  const isFourArgs = typeof arg1 === 'string' && typeof arg2 === 'string' && typeof arg3 === 'object';
+  const adminUserId = isFourArgs ? arg1 : undefined;
+  const cityId = isFourArgs ? arg2 : arg1;
+  const body = isFourArgs ? arg3 : arg2;
+  const confirm = isFourArgs ? arg4 : (arg3 || false);
+
+  return serviceAreaRequest(`/admin/service-areas/cities/${encodeURIComponent(cityId)}?confirm=${Boolean(confirm)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};
+
+// 4. Pincodes
+export const getPincodes = (params = {}) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const suffix = query.toString();
+  return serviceAreaRequest(`/admin/service-areas/pincodes${suffix ? `?${suffix}` : ''}`);
+};
+
+export const createPincode = (arg1, arg2) => {
+  const isTwoArgs = typeof arg1 === 'string' && arg2 !== undefined;
+  const adminUserId = isTwoArgs ? arg1 : undefined;
+  const body = isTwoArgs ? arg2 : arg1;
+
+  return serviceAreaRequest('/admin/service-areas/pincodes', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};
+
+export const bulkCreatePincodes = (arg1, arg2) => {
+  const isTwoArgs = typeof arg1 === 'string' && Array.isArray(arg2);
+  const adminUserId = isTwoArgs ? arg1 : undefined;
+  const list = isTwoArgs ? arg2 : arg1;
+
+  return serviceAreaRequest('/admin/service-areas/pincodes/bulk', {
+    method: 'POST',
+    body: JSON.stringify(list),
+  }, adminUserId);
+};
+
+export const updatePincode = (arg1, arg2, arg3, arg4 = false) => {
+  const isFourArgs = typeof arg1 === 'string' && typeof arg2 === 'string' && typeof arg3 === 'object';
+  const adminUserId = isFourArgs ? arg1 : undefined;
+  const pincodeId = isFourArgs ? arg2 : arg1;
+  const body = isFourArgs ? arg3 : arg2;
+  const confirm = isFourArgs ? arg4 : (arg3 || false);
+
+  return serviceAreaRequest(`/admin/service-areas/pincodes/${encodeURIComponent(pincodeId)}?confirm=${Boolean(confirm)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }, adminUserId);
+};

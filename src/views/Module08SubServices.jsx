@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, Clock, UploadCloud, X, Check, 
   IndianRupee, Package, Layers, ChevronDown, ChevronLeft, ChevronRight, Loader2, ImageOff
 } from 'lucide-react';
-import { createSubService, uploadSubServiceImage } from '../api/adminApi';
+import { createSubService, updateSubService, deleteSubService, uploadSubServiceImage } from '../api/adminApi';
 
 export const Module08SubServices = ({ subServices = [], setSubServices, categories = [], onRefresh }) => {
   // Live API sub-services mapping
@@ -67,10 +67,11 @@ const UNIT_PRESETS = [
   const [isUploading, setIsUploading] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState(null);
 
-  // Available Category Options from Live Backend
-  const categoryOptions = categories && categories.length > 0
-    ? categories.map(c => c.name)
-    : [];
+  // Available Category Options from Live Backend (deduplicated by name)
+  const categoryOptions = useMemo(() => {
+    if (!categories || !Array.isArray(categories)) return [];
+    return Array.from(new Set(categories.map(c => c?.name?.trim()).filter(Boolean)));
+  }, [categories]);
 
   // Filter logic
   const filteredSubs = effectiveSubServices.filter(item => {
@@ -135,7 +136,7 @@ const UNIT_PRESETS = [
   };
 
   // Delete Row
-  const handleDeleteRow = (item) => {
+  const handleDeleteRow = async (item) => {
     const id = item.subServiceId || item.id;
     if (!window.confirm(`Are you sure you want to delete "${item.name}"?`)) return;
 
@@ -143,6 +144,16 @@ const UNIT_PRESETS = [
       const list = prev && prev.length > 0 ? prev : [];
       return list.filter(s => (s.subServiceId !== id && s.id !== id));
     });
+
+    try {
+      await deleteSubService(id);
+      setFeedbackMsg(`"${item.name}" deleted successfully!`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Backend delete note:', err.message);
+    } finally {
+      setTimeout(() => setFeedbackMsg(null), 3000);
+    }
   };
 
   // Checkbox selection
@@ -189,8 +200,25 @@ const UNIT_PRESETS = [
 
     try {
       if (editingSub) {
-        // Edit existing
+        // Edit existing via API
         const subId = editingSub.subServiceId || editingSub.id;
+        try {
+          if (parentServiceId) {
+            await updateSubService(subId, {
+              service: { serviceId: parentServiceId },
+              name: payload.name,
+              pricingType: payload.pricingType,
+              basePrice: payload.basePrice,
+              unitLabel: payload.unitLabel,
+              estimatedMins: payload.estimatedMins,
+              imageUrl: payload.imageUrl,
+              isActive: payload.isActive
+            });
+          }
+        } catch (apiErr) {
+          console.warn('Backend update sub-service note:', apiErr.message);
+        }
+
         setSubServices(prev => {
           const list = prev && prev.length > 0 ? prev : [];
           return list.map(s => (s.subServiceId === subId || s.id === subId)
@@ -199,6 +227,7 @@ const UNIT_PRESETS = [
           );
         });
         setFeedbackMsg('Sub-service updated successfully!');
+        if (onRefresh) onRefresh();
       } else {
         // Create new via API
         let apiSubId = null;
@@ -308,8 +337,8 @@ const UNIT_PRESETS = [
                   className="pl-3.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition shadow-2xs appearance-none cursor-pointer"
                 >
                   <option value="ALL">All Categories</option>
-                  {categoryOptions.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
+                  {categoryOptions.map((cat, idx) => (
+                    <option key={`filter-cat-${cat}-${idx}`} value={cat}>{cat}</option>
                   ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -376,8 +405,8 @@ const UNIT_PRESETS = [
                 </td>
               </tr>
             )}
-                {filteredSubs.map((item) => {
-                  const id = item.subServiceId || item.id;
+                {filteredSubs.map((item, idx) => {
+                  const id = item.subServiceId || item.id || `sub-${idx}`;
                   const isChecked = selectedRowIds.includes(id);
                   const isActive = item.isActive !== undefined ? item.isActive : true;
 
@@ -596,8 +625,8 @@ const UNIT_PRESETS = [
                   }}
                   className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition appearance-none cursor-pointer"
                 >
-                  {categoryOptions.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
+                  {categoryOptions.map((cat, idx) => (
+                    <option key={`form-cat-${cat}-${idx}`} value={cat}>{cat}</option>
                   ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

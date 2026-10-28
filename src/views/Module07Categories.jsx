@@ -321,8 +321,8 @@ export const Module07Categories = ({ categories = [], subServices = [], setCateg
 
         {/* Categories Grid (matching reference screenshot) */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredCategories.map((cat) => {
-            const serviceId = cat.serviceId || cat.id;
+          {filteredCategories.map((cat, idx) => {
+            const serviceId = cat.serviceId || cat.id || `cat-${idx}`;
             const isActive = cat.isActive !== undefined ? cat.isActive : (cat.active ?? true);
             const isMenuOpen = activeMenuId === serviceId;
 

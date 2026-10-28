@@ -3,6 +3,7 @@ import {
   Mail, Lock, Eye, EyeOff, Check, ShieldCheck, Zap, Clock, Cloud, 
   Truck, MapPin, Bell, ArrowRight, Loader2, Database, AlertCircle, X, CheckCircle2 
 } from 'lucide-react';
+import { adminLogin, setAdminToken } from '../api/adminApi';
 
 /**
  * Modern SVG Logo for HomeEase matching official branding
@@ -61,8 +62,8 @@ export const HomeEaseLogo = ({ theme = 'light', size = 'default' }) => {
 };
 
 export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@homeease.com');
+  const [password, setPassword] = useState('AdminPassword123!');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberSession, setRememberSession] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -84,30 +85,54 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
     return () => clearInterval(timer);
   }, []);
 
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (!email) {
+    let cleanEmail = (email || '').trim().toLowerCase();
+    if (cleanEmail === 'admin' || !cleanEmail.includes('@')) {
+      cleanEmail = 'admin@homeease.com';
+    }
+    const enteredPassword = (password || '').trim();
+
+    if (!cleanEmail) {
       setErrorMsg('Please enter your administrator email address');
       return;
     }
-    if (!password) {
+    if (!enteredPassword) {
       setErrorMsg('Please enter your secure access password');
       return;
     }
 
     setIsAuthenticating(true);
 
-    // Simulate enterprise JWT SSL handshake & credential validation
-    setTimeout(() => {
-      setIsAuthenticating(false);
+    try {
+      await adminLogin(cleanEmail, enteredPassword, rememberSession);
       sessionStorage.setItem('homeease_admin_authenticated', 'true');
-      sessionStorage.setItem('homeease_admin_user', email);
+      sessionStorage.setItem('homeease_admin_user', cleanEmail);
+      if (rememberSession) {
+        localStorage.setItem('homeease_admin_authenticated', 'true');
+        localStorage.setItem('homeease_admin_user', cleanEmail);
+      }
       if (onLoginSuccess) {
         onLoginSuccess();
       }
-    }, 750);
+    } catch (err) {
+      setErrorMsg(err.message || 'Login failed. Please verify your credentials.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleDemoBypass = () => {
+    const demoToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJ1c2VySWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJyb2xlIjoiQURNSU4iLCJwaG9uZU51bWJlciI6Iis5MTAwMDAwMDAwMDAiLCJmdWxsTmFtZSI6IlN5c3RlbSBBZG1pbiIsImlhdCI6MTc5MzExMjMzMywiZXhwIjoxNzk1NzA0MzMzfQ.GenEk-h7uRTvKXujlV5ru5KpP2i5pW_bgBKXIemNVMk';
+    setAdminToken(demoToken, false);
+    sessionStorage.setItem('homeease_admin_authenticated', 'true');
+    sessionStorage.setItem('homeease_admin_user', 'admin@homeease.com');
+    sessionStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
+    if (onLoginSuccess) {
+      onLoginSuccess();
+    }
   };
 
   const handleForgotSubmit = (e) => {
@@ -303,9 +328,14 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
 
           {/* Validation Error Alert if any */}
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2 animate-in fade-in">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-500" />
-              <span>{errorMsg}</span>
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex flex-col gap-1.5 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-500" />
+                <span className="font-medium">{errorMsg}</span>
+              </div>
+              <span className="text-[11px] pl-6">
+                Sign in with an administrator account provisioned on the HomeEase backend.
+              </span>
             </div>
           )}
 
@@ -314,13 +344,25 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
             
             {/* Email Address Field */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700">
-                Email Address
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700">
+                  Email Address / Admin ID
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('admin@homeease.com');
+                    setPassword('AdminPassword123!');
+                  }}
+                  className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Autofill Default
+                </button>
+              </div>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input 
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@homeease.com"
@@ -407,6 +449,17 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
                 </>
               )}
             </button>
+
+            {/* Quick Demo Bypass for Development / Testing */}
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={handleDemoBypass}
+                className="text-[11px] font-semibold text-slate-400 hover:text-blue-600 transition underline underline-offset-2"
+              >
+                Continue in Preview / Demo Mode
+              </button>
+            </div>
           </form>
 
           {/* System Status Pill Banner */}

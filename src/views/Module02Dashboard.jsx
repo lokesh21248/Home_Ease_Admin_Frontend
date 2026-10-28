@@ -71,6 +71,8 @@ export const Module02Dashboard = ({
     
     const count = categories.length;
     return categories.map((cat, idx) => ({
+      id: cat.serviceId || cat.id || `cat-${idx}`,
+      serviceId: cat.serviceId || cat.id,
       name: cat.name,
       value: Math.round(100 / count),
       amount: `${cat.subServicesCount || 0} sub-services`,
@@ -311,8 +313,8 @@ export const Module02Dashboard = ({
 
           {/* Category Legend Table */}
           <div className="space-y-2 border-t border-slate-100 pt-3">
-            {categoryBreakdown.slice(0, 4).map((cat) => (
-              <div key={cat.name} className="flex items-center justify-between text-xs">
+            {categoryBreakdown.slice(0, 4).map((cat, idx) => (
+              <div key={cat.serviceId || cat.id || `${cat.name}-${idx}`} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }}></span>
                   <span className="font-semibold text-slate-700 truncate">{cat.name}</span>

@@ -35,58 +35,64 @@ export const ModuleAnalytics = ({
   // Fulfillment rate
   const fulfillmentRate = totalBookingsCount > 0 
     ? ((completedBookingsCount / totalBookingsCount) * 100).toFixed(1) 
-    : '94.2';
+    : '0.0';
 
   // Average booking value
   const avgOrderValue = totalBookingsCount > 0 
     ? Math.round(totalRevenue / totalBookingsCount) 
-    : (totalRevenue > 0 ? totalRevenue : 850);
+    : 0;
 
   // Active worker fleet utilization
   const fleetUtilization = totalWorkersCount > 0 
     ? ((activeWorkersCount / totalWorkersCount) * 100).toFixed(0) 
-    : '78';
+    : '0';
 
-  // Revenue & Orders Trend Data
+  // Revenue & Orders Trend Data computed from live metrics
   const trendData = useMemo(() => {
+    if (ledger && ledger.length > 0) {
+      return ledger.map((item, idx) => ({
+        period: item.date ? item.date.split(' ')[0] : `Entry ${idx + 1}`,
+        gmv: item.grossAmount || 0,
+        commission: item.platformCommissionAmount || item.commission || 0,
+        orders: 1,
+        completed: (item.status === 'SUCCESS' || item.status === 'COMPLETED') ? 1 : 0
+      }));
+    }
+
     if (timeRange === '7D') {
-      return [
-        { period: 'Mon', gmv: Math.round(totalRevenue * 0.12) || 4500, commission: Math.round(totalCommission * 0.12) || 450, orders: 12, completed: 11 },
-        { period: 'Tue', gmv: Math.round(totalRevenue * 0.14) || 5800, commission: Math.round(totalCommission * 0.14) || 580, orders: 16, completed: 15 },
-        { period: 'Wed', gmv: Math.round(totalRevenue * 0.11) || 3900, commission: Math.round(totalCommission * 0.11) || 390, orders: 10, completed: 9 },
-        { period: 'Thu', gmv: Math.round(totalRevenue * 0.16) || 6200, commission: Math.round(totalCommission * 0.16) || 620, orders: 18, completed: 17 },
-        { period: 'Fri', gmv: Math.round(totalRevenue * 0.18) || 7400, commission: Math.round(totalCommission * 0.18) || 740, orders: 22, completed: 21 },
-        { period: 'Sat', gmv: Math.round(totalRevenue * 0.24) || 9800, commission: Math.round(totalCommission * 0.24) || 980, orders: 28, completed: 27 },
-        { period: 'Sun', gmv: Math.round(totalRevenue * 0.28) || 11200, commission: Math.round(totalCommission * 0.28) || 1120, orders: 32, completed: 30 },
-      ];
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days.map(d => ({
+        period: d,
+        gmv: Math.round(totalRevenue / 7),
+        commission: Math.round(totalCommission / 7),
+        orders: Math.round(totalBookingsCount / 7),
+        completed: Math.round(completedBookingsCount / 7)
+      }));
     }
     
     // Default 30D / 90D / ALL
-    return [
-      { period: 'Week 1', gmv: Math.round(totalRevenue * 0.18) || 14500, commission: Math.round(totalCommission * 0.18) || 1450, orders: 48, completed: 45 },
-      { period: 'Week 2', gmv: Math.round(totalRevenue * 0.24) || 19200, commission: Math.round(totalCommission * 0.24) || 1920, orders: 62, completed: 59 },
-      { period: 'Week 3', gmv: Math.round(totalRevenue * 0.28) || 24800, commission: Math.round(totalCommission * 0.28) || 2480, orders: 78, completed: 74 },
-      { period: 'Week 4', gmv: Math.round(totalRevenue * 0.35) || 31500, commission: Math.round(totalCommission * 0.35) || 3150, orders: 95, completed: 91 },
-    ];
-  }, [timeRange, totalRevenue, totalCommission]);
+    const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+    return weeks.map(w => ({
+      period: w,
+      gmv: Math.round(totalRevenue / 4),
+      commission: Math.round(totalCommission / 4),
+      orders: Math.round(totalBookingsCount / 4),
+      completed: Math.round(completedBookingsCount / 4)
+    }));
+  }, [timeRange, totalRevenue, totalCommission, totalBookingsCount, completedBookingsCount, ledger]);
 
-  // Category Distribution Data
+  // Category Distribution Data from live backend categories
   const categoryChartData = useMemo(() => {
     const palette = ['#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#06B6D4', '#6366F1'];
     if (categories && categories.length > 0) {
+      const totalCount = categories.reduce((sum, c) => sum + (c.subServicesCount || 1), 0) || 1;
       return categories.slice(0, 6).map((cat, idx) => ({
         name: cat.name,
-        value: cat.subServicesCount ? Number(cat.subServicesCount) * 15 : (20 + idx * 8),
+        value: Math.round(((cat.subServicesCount || 1) / totalCount) * 100),
         color: palette[idx % palette.length]
       }));
     }
-    return [
-      { name: 'Cleaning & Maid', value: 38, color: '#3B82F6' },
-      { name: 'AC & Appliance Repair', value: 27, color: '#10B981' },
-      { name: 'Plumbing & Sanitary', value: 18, color: '#F59E0B' },
-      { name: 'Electrician Services', value: 12, color: '#8B5CF6' },
-      { name: 'Painting & Masonry', value: 5, color: '#EC4899' },
-    ];
+    return [];
   }, [categories]);
 
   // Hourly Demand Breakdown

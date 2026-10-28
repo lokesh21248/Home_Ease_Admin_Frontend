@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { 
-  Menu, Search, Bell, Shield, ChevronDown, CheckCircle, 
+  Menu, Search, Bell, ChevronDown, CheckCircle, 
   AlertTriangle, LogOut, Sparkles, X 
 } from 'lucide-react';
 import { ADMIN_ROLES } from '../constants/system';
 
 export const Header = ({ 
-  activeModule, 
+  activeModule: _activeModule,
   setActiveModule,
   currentRole, 
   setCurrentRole, 
@@ -20,11 +20,11 @@ export const Header = ({
   setIsCollapsed,
   onOpenMobileSidebar
 }) => {
-  const [showRoleDropdown, setShowRoleDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const notificationCount = Array.isArray(notifications) ? notifications.length : 0;
 
   const handleSearchChange = (e) => {
     setSearchQuery(e.target.value);
@@ -154,7 +154,7 @@ export const Header = ({
           >
             <Bell className="w-4 h-4" />
             <span className="absolute top-0 right-0 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-white shadow-xs">
-              3
+              {notificationCount > 99 ? '99+' : notificationCount}
             </span>
           </button>
 
@@ -164,7 +164,7 @@ export const Header = ({
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Bell className="w-3.5 h-3.5 text-blue-600" /> Notifications
                 </span>
-                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">3 New</span>
+                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{notificationCount} New</span>
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-slate-50">
                 <div className="p-3 hover:bg-slate-50 transition cursor-pointer">

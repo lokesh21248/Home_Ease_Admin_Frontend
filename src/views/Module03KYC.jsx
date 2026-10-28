@@ -206,8 +206,8 @@ export const Module03KYC = ({ workers = [], setWorkers, onRefresh }) => {
                   </td>
                 </tr>
               ) : (
-                filteredQueue.map(item => (
-                  <tr key={item.id} className="hover:bg-slate-50/80 transition">
+                filteredQueue.map((item, idx) => (
+                  <tr key={item.id || item.workerId || `kyc-${idx}`} className="hover:bg-slate-50/80 transition">
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-3">
                         {item.profilePhotoUrl && !item.profilePhotoUrl.includes('unsplash') ? (
