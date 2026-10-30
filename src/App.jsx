@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { 
@@ -38,28 +38,43 @@ import { Module12Notifications } from './views/Module12Notifications';
 import { Module13Settings } from './views/Module13Settings';
 import { Module14ServiceAreas } from './views/Module14ServiceAreas';
 
+const isAdminAuthenticated = () => {
+  if (typeof window === 'undefined') return false;
+
+  return (
+    sessionStorage.getItem('homeease_admin_authenticated') === 'true' ||
+    localStorage.getItem('homeease_admin_authenticated') === 'true' ||
+    sessionStorage.getItem('adminAuthenticated') === 'true' ||
+    localStorage.getItem('adminAuthenticated') === 'true' ||
+    !!(sessionStorage.getItem('adminToken') || localStorage.getItem('adminToken')) ||
+    !!(sessionStorage.getItem('homeease_admin_token') || localStorage.getItem('homeease_admin_token'))
+  );
+};
+
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return (
-      sessionStorage.getItem('homeease_admin_authenticated') === 'true' ||
-      localStorage.getItem('homeease_admin_authenticated') === 'true'
-    );
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(isAdminAuthenticated);
   const [activeModule, setActiveModule] = useState('dashboard');
   const [currentRole, setCurrentRole] = useState(ADMIN_ROLES[0]);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const handleLoginSuccess = () => {
     sessionStorage.setItem('homeease_admin_authenticated', 'true');
+    sessionStorage.setItem('adminAuthenticated', 'true');
+    localStorage.setItem('homeease_admin_authenticated', 'true');
+    localStorage.setItem('adminAuthenticated', 'true');
     setIsAuthenticated(true);
     setActiveModule('dashboard');
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem('homeease_admin_authenticated');
+    sessionStorage.removeItem('adminAuthenticated');
     sessionStorage.removeItem('homeease_admin_user');
+    sessionStorage.removeItem('adminUser');
     localStorage.removeItem('homeease_admin_authenticated');
+    localStorage.removeItem('adminAuthenticated');
     localStorage.removeItem('homeease_admin_user');
+    localStorage.removeItem('adminUser');
     clearAdminToken();
     setIsAuthenticated(false);
     setActiveModule('dashboard');
@@ -71,6 +86,7 @@ export default function App() {
   // Live Server Status & Sync State
   const [serverOnline, setServerOnline] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const syncInProgress = useRef(false);
 
   // Live Cloud Data Engines across Modules
   const [rawStats, setRawStats] = useState(null);
@@ -94,7 +110,10 @@ export default function App() {
 
   // Synchronize All Live Data from AWS Live Server (http://3.107.161.126:8080)
   const syncAllLiveData = useCallback(async () => {
+    if (syncInProgress.current) return;
+    syncInProgress.current = true;
     setIsSyncing(true);
+    let latestLiveMap = null;
 
     try {
       // 1. Dashboard Stats
@@ -146,6 +165,7 @@ export default function App() {
       // 6. Live Map Telemetry
       try {
         const mapData = await getLiveMap();
+        latestLiveMap = mapData;
         if (mapData) setLiveMapData(mapData);
       } catch (err) {
         console.warn('Live map fetch error:', err.message);
@@ -161,7 +181,7 @@ export default function App() {
 
       // 8. Bookings & Order Lifecycle
       try {
-        const bList = await getBookings();
+        const bList = await getBookings(latestLiveMap);
         if (Array.isArray(bList) && bList.length > 0) {
           setBookings(bList);
           localStorage.setItem('homeease_admin_bookings', JSON.stringify(bList));
@@ -216,6 +236,7 @@ export default function App() {
       }
 
     } finally {
+      syncInProgress.current = false;
       setIsSyncing(false);
     }
   }, []);

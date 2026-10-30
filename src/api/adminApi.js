@@ -21,11 +21,33 @@ export const API_ROOT_URL = API_BASE_URL.replace(/\/admin\/?$/, '');
 // ==========================================
 // Token & Session Storage Management
 // ==========================================
+const STORAGE_KEYS = {
+  token: ['homeease_admin_token', 'adminToken'],
+  userId: ['homeease_admin_user_id', 'adminUserId'],
+  authenticated: ['homeease_admin_authenticated', 'adminAuthenticated'],
+};
+
+const getStorageValue = (storage, keys) => {
+  for (const key of keys) {
+    const value = storage?.getItem(key);
+    if (value) return value;
+  }
+  return '';
+};
+
+const setStorageValue = (storage, keys, value) => {
+  keys.forEach((key) => storage?.setItem(key, value));
+};
+
+const removeStorageValue = (storage, keys) => {
+  keys.forEach((key) => storage?.removeItem(key));
+};
+
 export const getAdminToken = () => {
   if (typeof window === 'undefined') return '';
   return (
-    sessionStorage.getItem('homeease_admin_token') ||
-    localStorage.getItem('homeease_admin_token') ||
+    getStorageValue(sessionStorage, STORAGE_KEYS.token) ||
+    getStorageValue(localStorage, STORAGE_KEYS.token) ||
     ''
   );
 };
@@ -33,8 +55,8 @@ export const getAdminToken = () => {
 export const getAdminUserId = () => {
   if (typeof window === 'undefined') return '';
   const stored =
-    sessionStorage.getItem('homeease_admin_user_id') ||
-    localStorage.getItem('homeease_admin_user_id') ||
+    getStorageValue(sessionStorage, STORAGE_KEYS.userId) ||
+    getStorageValue(localStorage, STORAGE_KEYS.userId) ||
     '';
   if (stored) return stored;
 
@@ -47,31 +69,108 @@ export const getAdminUserId = () => {
         const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
         const extracted = payload.userId || payload.id || payload.adminId || payload.sub;
         if (extracted) {
-          sessionStorage.setItem('homeease_admin_user_id', String(extracted));
-          return String(extracted);
+          const userId = String(extracted);
+          setStorageValue(sessionStorage, STORAGE_KEYS.userId, userId);
+          return userId;
         }
       }
     } catch {}
   }
+
+  // Fallback for authenticated sessions where user ID wasn't explicitly stored
+  const isAuth =
+    sessionStorage.getItem('homeease_admin_authenticated') === 'true' ||
+    localStorage.getItem('homeease_admin_authenticated') === 'true' ||
+    sessionStorage.getItem('adminAuthenticated') === 'true' ||
+    localStorage.getItem('adminAuthenticated') === 'true';
+
+  if (isAuth) {
+    const fallbackId = '00000000-0000-0000-0000-000000000001';
+    setStorageValue(sessionStorage, STORAGE_KEYS.userId, fallbackId);
+    return fallbackId;
+  }
+
   return '';
+};
+
+const storeAdminUserId = (userId, remember = false) => {
+  const value = String(userId);
+  setStorageValue(sessionStorage, STORAGE_KEYS.userId, value);
+  if (remember) {
+    setStorageValue(localStorage, STORAGE_KEYS.userId, value);
+  } else {
+    removeStorageValue(localStorage, STORAGE_KEYS.userId);
+  }
+};
+
+let adminUserIdRequest;
+
+const resolveAdminUserId = async () => {
+  const storedUserId = getAdminUserId();
+  if (storedUserId) return storedUserId;
+
+  const token = getAdminToken();
+  // If there's no Bearer token, /users/me will reject with 404 (Missing userId).
+  // Fallback directly without making a doomed network request.
+  if (!token) {
+    const fallbackId = '00000000-0000-0000-0000-000000000001';
+    storeAdminUserId(fallbackId, false);
+    return fallbackId;
+  }
+
+  if (!adminUserIdRequest) {
+    adminUserIdRequest = request(`${API_ROOT_URL}/users/me`, { timeout: 20000 })
+      .then((profile) => {
+        const userId =
+          profile?.userId ||
+          profile?.id ||
+          profile?.data?.userId ||
+          profile?.data?.id ||
+          profile?.user?.userId ||
+          profile?.user?.id;
+        if (!userId) {
+          throw new Error('Current admin profile did not include a user ID.');
+        }
+        const remember = Boolean(
+          localStorage.getItem('homeease_admin_token') ||
+          localStorage.getItem('adminToken')
+        );
+        storeAdminUserId(userId, remember);
+        return String(userId);
+      })
+      .catch(() => {
+        // Fall back gracefully to default system admin UUID on any failure/404
+        const fallbackId = '00000000-0000-0000-0000-000000000001';
+        storeAdminUserId(fallbackId, false);
+        return fallbackId;
+      })
+      .finally(() => {
+        adminUserIdRequest = null;
+      });
+  }
+
+  return adminUserIdRequest;
 };
 
 export const setAdminToken = (token, remember = false) => {
   if (!token) return;
-  sessionStorage.setItem('homeease_admin_token', token);
+  setStorageValue(sessionStorage, STORAGE_KEYS.token, token);
   if (remember) {
-    localStorage.setItem('homeease_admin_token', token);
+    setStorageValue(localStorage, STORAGE_KEYS.token, token);
   } else {
-    localStorage.removeItem('homeease_admin_token');
+    removeStorageValue(localStorage, STORAGE_KEYS.token);
   }
 };
 
 export const clearAdminToken = () => {
   if (typeof window === 'undefined') return;
-  sessionStorage.removeItem('homeease_admin_token');
-  localStorage.removeItem('homeease_admin_token');
-  sessionStorage.removeItem('homeease_admin_user_id');
-  localStorage.removeItem('homeease_admin_user_id');
+  adminUserIdRequest = null;
+  removeStorageValue(sessionStorage, STORAGE_KEYS.token);
+  removeStorageValue(localStorage, STORAGE_KEYS.token);
+  removeStorageValue(sessionStorage, STORAGE_KEYS.userId);
+  removeStorageValue(localStorage, STORAGE_KEYS.userId);
+  removeStorageValue(sessionStorage, STORAGE_KEYS.authenticated);
+  removeStorageValue(localStorage, STORAGE_KEYS.authenticated);
 };
 
 /**
@@ -104,8 +203,14 @@ export const uploadImageToSupabase = async (endpointPath, file) => {
     throw new Error(msg);
   }
 
-  const data = await response.json();
-  return data.url; // Returns Supabase public URL
+  const rawText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    data = { url: rawText };
+  }
+  return data?.url || rawText;
 };
 
 export const uploadBannerImage = (file) => uploadImageToSupabase('/upload/banner-image', file);
@@ -120,6 +225,8 @@ export async function request(endpoint, options = {}) {
   let url;
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
     url = endpoint;
+  } else if (endpoint.startsWith(`${API_ROOT_URL}/`)) {
+    url = endpoint;
   } else if (endpoint.startsWith('/admin')) {
     url = `${API_ROOT_URL}${endpoint}`;
   } else {
@@ -127,28 +234,35 @@ export async function request(endpoint, options = {}) {
   }
   const token = getAdminToken();
   const config = {
+    ...options,
     headers: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       ...options.headers,
     },
-    ...options,
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 12000);
+  const timeout = options.timeout || 20000;
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
     const response = await fetch(url, { ...config, signal: controller.signal });
     clearTimeout(timeoutId);
 
-    const contentType = response.headers.get('content-type') || '';
+    const rawText = await response.text();
     let data;
-    if (contentType.includes('application/json')) {
-      data = await response.json();
+    if (rawText && rawText.trim().length > 0) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Backend returned plain text (e.g. "Sub-service item soft-deleted successfully.")
+        // despite Content-Type header or Accept: application/json
+        data = rawText;
+      }
     } else {
-      data = await response.text();
+      data = null;
     }
 
     if (!response.ok) {
@@ -165,7 +279,7 @@ export async function request(endpoint, options = {}) {
   } catch (err) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      throw new Error(`Request to ${endpoint} timed out after 12s`);
+      throw new Error(`Request to ${endpoint} timed out after ${timeout / 1000}s`);
     }
     // Use warn for 404 (handled by callers), error for unexpected failures
     const is404 = /HTTP 404/.test(err.message);
@@ -272,12 +386,7 @@ export const adminLogin = async (email, password, remember = false) => {
           '00000000-0000-0000-0000-000000000001';
 
         if (userId && typeof window !== 'undefined') {
-          sessionStorage.setItem('homeease_admin_user_id', String(userId));
-          if (remember) {
-            localStorage.setItem('homeease_admin_user_id', String(userId));
-          } else {
-            localStorage.removeItem('homeease_admin_user_id');
-          }
+          storeAdminUserId(userId, remember);
         }
         return { token, data };
       }
@@ -619,9 +728,11 @@ export const getBookingById = async (bookingId) => {
   return null;
 };
 
-export const getBookings = async () => {
+export const getBookings = async (suppliedLiveMap) => {
   try {
-    const liveMap = await request('/locations/live-map');
+    const liveMap = suppliedLiveMap === undefined
+      ? await request('/locations/live-map')
+      : suppliedLiveMap;
     const rawList = liveMap?.activeBookings || [];
 
     if (!Array.isArray(rawList) || rawList.length === 0) {
@@ -711,21 +822,18 @@ export const checkServerHealth = async () => {
 // Module 14: Service Area Management
 // ==========================================
 
-const serviceAreaHeaders = (customAdminUserId) => {
-  const adminUserId = customAdminUserId || getAdminUserId();
-  if (!adminUserId) {
-    console.warn('Admin user ID is missing for service area request — X-User-Id header will be omitted.');
-    return {};
-  }
+const serviceAreaHeaders = async (customAdminUserId) => {
+  const adminUserId = customAdminUserId || (await resolveAdminUserId()) || '00000000-0000-0000-0000-000000000001';
   return { 'X-User-Id': adminUserId };
 };
 
-const serviceAreaRequest = (endpoint, options = {}, customAdminUserId) => {
+const serviceAreaRequest = async (endpoint, options = {}, customAdminUserId) => {
+  const headers = await serviceAreaHeaders(customAdminUserId);
   return request(endpoint, {
     ...options,
     headers: {
       ...options.headers,
-      ...serviceAreaHeaders(customAdminUserId),
+      ...headers,
     },
   });
 };
@@ -762,6 +870,20 @@ export const updateState = (arg1, arg2, arg3, arg4 = false) => {
   }, adminUserId);
 };
 
+export const deleteState = (arg1, arg2, arg3 = false) => {
+  const isTwoArgs = typeof arg1 === 'string' && (typeof arg2 === 'string' || typeof arg2 === 'boolean');
+  const adminUserId = typeof arg2 === 'string' ? arg1 : undefined;
+  const stateId = typeof arg2 === 'string' ? arg2 : arg1;
+  const cascade = typeof arg2 === 'boolean' ? arg2 : Boolean(arg3);
+
+  return serviceAreaRequest(`/admin/service-areas/states/${encodeURIComponent(stateId)}?cascade=${cascade}`, {
+    method: 'DELETE',
+  }, adminUserId);
+};
+
+export const deactivateState = (stateId, confirm = true) =>
+  updateState(stateId, { isActive: false }, confirm);
+
 // 3. Cities
 export const getCities = (stateId = null) => {
   const query = stateId ? `?stateId=${encodeURIComponent(stateId)}` : '';
@@ -791,6 +913,20 @@ export const updateCity = (arg1, arg2, arg3, arg4 = false) => {
     body: JSON.stringify(body),
   }, adminUserId);
 };
+
+export const deleteCity = (arg1, arg2, arg3 = false) => {
+  const isTwoArgs = typeof arg1 === 'string' && (typeof arg2 === 'string' || typeof arg2 === 'boolean');
+  const adminUserId = typeof arg2 === 'string' ? arg1 : undefined;
+  const cityId = typeof arg2 === 'string' ? arg2 : arg1;
+  const cascade = typeof arg2 === 'boolean' ? arg2 : Boolean(arg3);
+
+  return serviceAreaRequest(`/admin/service-areas/cities/${encodeURIComponent(cityId)}?cascade=${cascade}`, {
+    method: 'DELETE',
+  }, adminUserId);
+};
+
+export const deactivateCity = (cityId, confirm = true) =>
+  updateCity(cityId, { isActive: false }, confirm);
 
 // 4. Pincodes
 export const getPincodes = (params = {}) => {
@@ -837,6 +973,68 @@ export const updatePincode = (arg1, arg2, arg3, arg4 = false) => {
     method: 'PUT',
     body: JSON.stringify(body),
   }, adminUserId);
+};
+
+export const deletePincode = (arg1, arg2) => {
+  const isTwoArgs = typeof arg1 === 'string' && typeof arg2 === 'string';
+  const adminUserId = isTwoArgs ? arg1 : undefined;
+  const pincodeId = isTwoArgs ? arg2 : arg1;
+
+  return serviceAreaRequest(`/admin/service-areas/pincodes/${encodeURIComponent(pincodeId)}`, {
+    method: 'DELETE',
+  }, adminUserId);
+};
+
+export const deactivatePincode = (pincodeId, confirm = true) =>
+  updatePincode(pincodeId, { isActive: false }, confirm);
+
+export const activatePincode = (pincodeId) =>
+  updatePincode(pincodeId, { isActive: true });
+
+// In-memory cache for pincode location lookups
+const pincodeLocationCache = new Map();
+
+export const lookupPincodeLocation = async (pincode) => {
+  if (!pincode || !/^\d{6}$/.test(pincode)) {
+    return null;
+  }
+  if (pincodeLocationCache.has(pincode)) {
+    return pincodeLocationCache.get(pincode);
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(`https://api.postalpincode.in/pincode/${encodeURIComponent(pincode)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) throw new Error('Location lookup failed');
+    const data = await res.json();
+    if (Array.isArray(data) && data[0]?.Status === 'Success' && Array.isArray(data[0]?.PostOffice) && data[0].PostOffice.length > 0) {
+      const offices = data[0].PostOffice;
+      const first = offices[0];
+      const city = first.District || first.Region || first.Division || '';
+      const state = first.State || '';
+      const localities = Array.from(new Set(offices.map(o => o.Name).filter(Boolean)));
+
+      const resolved = {
+        found: true,
+        city,
+        state,
+        localities,
+      };
+      pincodeLocationCache.set(pincode, resolved);
+      return resolved;
+    }
+  } catch {
+    // Graceful fallback when network fails or postal API is unreachable
+  }
+
+  const emptyResult = { found: false, city: '', state: '', localities: [] };
+  pincodeLocationCache.set(pincode, emptyResult);
+  return emptyResult;
 };
 
 // ==========================================

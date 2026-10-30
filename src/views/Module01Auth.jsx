@@ -109,10 +109,14 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
     try {
       await adminLogin(cleanEmail, enteredPassword, rememberSession);
       sessionStorage.setItem('homeease_admin_authenticated', 'true');
+      sessionStorage.setItem('adminAuthenticated', 'true');
       sessionStorage.setItem('homeease_admin_user', cleanEmail);
+      sessionStorage.setItem('adminUser', cleanEmail);
       if (rememberSession) {
         localStorage.setItem('homeease_admin_authenticated', 'true');
+        localStorage.setItem('adminAuthenticated', 'true');
         localStorage.setItem('homeease_admin_user', cleanEmail);
+        localStorage.setItem('adminUser', cleanEmail);
       }
       if (onLoginSuccess) {
         onLoginSuccess();
@@ -128,8 +132,11 @@ export const Module01Auth = ({ onLoginSuccess, currentRole, setCurrentRole }) =>
     const demoToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJ1c2VySWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJyb2xlIjoiQURNSU4iLCJwaG9uZU51bWJlciI6Iis5MTAwMDAwMDAwMDAiLCJmdWxsTmFtZSI6IlN5c3RlbSBBZG1pbiIsImlhdCI6MTc5MzExMjMzMywiZXhwIjoxNzk1NzA0MzMzfQ.GenEk-h7uRTvKXujlV5ru5KpP2i5pW_bgBKXIemNVMk';
     setAdminToken(demoToken, false);
     sessionStorage.setItem('homeease_admin_authenticated', 'true');
+    sessionStorage.setItem('adminAuthenticated', 'true');
     sessionStorage.setItem('homeease_admin_user', 'admin@homeease.com');
+    sessionStorage.setItem('adminUser', 'admin@homeease.com');
     sessionStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
+    sessionStorage.setItem('adminUserId', '00000000-0000-0000-0000-000000000001');
     if (onLoginSuccess) {
       onLoginSuccess();
     }
