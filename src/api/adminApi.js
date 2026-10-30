@@ -838,3 +838,13 @@ export const updatePincode = (arg1, arg2, arg3, arg4 = false) => {
     body: JSON.stringify(body),
   }, adminUserId);
 };
+
+// ==========================================
+// App Version & Force Update Governance APIs
+// ==========================================
+export const appVersionsApi = {
+  getAll: () => request('/admin/app-versions'),
+  update: (appType, data) => request(`/admin/app-versions/${appType}`, { method: 'PUT', body: JSON.stringify(data) }),
+  checkUpdate: (currentVersion = '1.0.0', platform = 'web') =>
+    request(`/app/check-update?appType=ADMIN&currentVersion=${encodeURIComponent(currentVersion)}&platform=${encodeURIComponent(platform)}`),
+};
