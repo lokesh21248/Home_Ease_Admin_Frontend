@@ -1046,3 +1046,19 @@ export const appVersionsApi = {
   checkUpdate: (currentVersion = '1.0.0', platform = 'web') =>
     request(`/app/check-update?appType=ADMIN&currentVersion=${encodeURIComponent(currentVersion)}&platform=${encodeURIComponent(platform)}`),
 };
+
+// ==========================================
+// Module 06: Dispatch Diagnostics & Monitoring (Task 8)
+// ==========================================
+export const getDispatchLogs = async (bookingId = null, page = 0, size = 20) => {
+  const query = bookingId ? `?bookingId=${bookingId}&page=${page}&size=${size}` : `?page=${page}&size=${size}`;
+  return request(`/dispatch/logs${query}`);
+};
+
+export const getFailedDispatchBookings = async () => {
+  return request('/dispatch/failed-bookings');
+};
+
+export const getDispatchHistory = async () => {
+  return request('/dispatch/history');
+};
