@@ -216,6 +216,7 @@ export const uploadImageToSupabase = async (endpointPath, file) => {
 export const uploadBannerImage = (file) => uploadImageToSupabase('/upload/banner-image', file);
 export const uploadServiceImage = (file) => uploadImageToSupabase('/upload/service-image', file);
 export const uploadSubServiceImage = (file) => uploadImageToSupabase('/upload/sub-service-image', file);
+export const uploadExploreServiceImage = (file) => uploadImageToSupabase('/upload/service-image', file);
 export const uploadWorkerProfile = (workerId, file) => uploadImageToSupabase(`/upload/worker-profile/${workerId}`, file);
 export const uploadWorkerPan = (workerId, file) => uploadImageToSupabase(`/upload/worker-kyc/pan/${workerId}`, file);
 export const uploadWorkerAadhaar = (workerId, file) => uploadImageToSupabase(`/upload/worker-kyc/aadhaar/${workerId}`, file);
@@ -532,16 +533,220 @@ export const createSubService = async (subServiceData) => {
 };
 
 export const updateSubService = (subServiceId, subServiceData) => {
-  return request(`/sub-services/${subServiceId}`, {
+  const id = typeof subServiceId === 'object' ? (subServiceId?.subServiceId || subServiceId?.id) : subServiceId;
+  if (!id) throw new Error('Sub-service ID is required');
+  return request(`/sub-services/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify(subServiceData),
   });
 };
 
 export const deleteSubService = (subServiceId) => {
-  return request(`/sub-services/${subServiceId}`, {
+  const id = typeof subServiceId === 'object' ? (subServiceId?.subServiceId || subServiceId?.id) : subServiceId;
+  if (!id) throw new Error('Sub-service ID is required');
+  return request(`/sub-services/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
+};
+
+// ==========================================
+// Explore Services Catalog Management APIs
+// ==========================================
+
+const DEFAULT_EXPLORE_SERVICES = [
+  {
+    id: 'a1b2c3d4-0001-4000-8000-000000000001',
+    name: 'Full Home Deep Cleaning',
+    slug: 'full-home-deep-cleaning',
+    description: 'Complete top-to-bottom sanitization with mechanized scrubbers and eco-safe disinfectants.',
+    categoryId: 'be8bb640-cc11-4243-ab4a-5cbdf34a0937',
+    categoryName: 'Cleaning',
+    imageUrl: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&q=80',
+    price: 1499.00,
+    originalPrice: 1999.00,
+    rating: 4.9,
+    reviewCount: 142,
+    displayOrder: 1,
+    isActive: true,
+    isFeatured: true,
+  },
+  {
+    id: 'a1b2c3d4-0002-4000-8000-000000000002',
+    name: 'Kitchen Intensive Degreasing & Sanitization',
+    slug: 'kitchen-intensive-degreasing',
+    description: 'Deep chimney, stovetop, slab and tile oil stain removal using hot foam and industrial degreasers.',
+    categoryId: 'be8bb640-cc11-4243-ab4a-5cbdf34a0937',
+    categoryName: 'Cleaning',
+    imageUrl: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&q=80',
+    price: 799.00,
+    originalPrice: 999.00,
+    rating: 4.8,
+    reviewCount: 89,
+    displayOrder: 2,
+    isActive: true,
+    isFeatured: true,
+  },
+  {
+    id: 'a1b2c3d4-0003-4000-8000-000000000003',
+    name: 'Switchboard Repair & Socket Replacement',
+    slug: 'switchboard-repair-socket-replacement',
+    description: 'Safe diagnostics, burnt wire insulation rewiring, and modular switch replacements.',
+    categoryId: '6e2e370b-7d5e-46d2-944b-afe7c15db6d5',
+    categoryName: 'Electrician Services',
+    imageUrl: 'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=800&q=80',
+    price: 149.00,
+    originalPrice: 249.00,
+    rating: 4.7,
+    reviewCount: 64,
+    displayOrder: 3,
+    isActive: true,
+    isFeatured: false,
+  },
+  {
+    id: 'a1b2c3d4-0004-4000-8000-000000000004',
+    name: 'Bathroom Deep Descale & Sanitization',
+    slug: 'bathroom-deep-descale-sanitization',
+    description: 'Hard-water stain scrubbing, tap acid wash, mirror polish and drain unclog treatment.',
+    categoryId: 'be8bb640-cc11-4243-ab4a-5cbdf34a0937',
+    categoryName: 'Cleaning',
+    imageUrl: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=800&q=80',
+    price: 499.00,
+    originalPrice: 699.00,
+    rating: 4.9,
+    reviewCount: 115,
+    displayOrder: 4,
+    isActive: true,
+    isFeatured: false,
+  }
+];
+
+const getStoredExploreServices = () => {
+  try {
+    const raw = localStorage.getItem('homeease_explore_services_cache');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_EXPLORE_SERVICES;
+};
+
+const setStoredExploreServices = (data) => {
+  try {
+    localStorage.setItem('homeease_explore_services_cache', JSON.stringify(data));
+  } catch {}
+};
+
+export const getExploreServices = async () => {
+  try {
+    const data = await request('/explore-services');
+    if (Array.isArray(data)) {
+      setStoredExploreServices(data);
+      return data;
+    }
+  } catch (error) {
+    // If backend returns 404 (not yet deployed to EC2), smoothly serve persistent cache
+    console.info('Using explore services cache while EC2 backend deploys:', error.message);
+  }
+  return getStoredExploreServices();
+};
+
+export const getExploreServiceById = async (id) => {
+  if (!id) throw new Error('Explore service ID is required');
+  try {
+    return await request(`/explore-services/${encodeURIComponent(id)}`);
+  } catch {
+    const list = getStoredExploreServices();
+    const item = list.find(i => i.id === id);
+    if (item) return item;
+    throw new Error('Explore service not found');
+  }
+};
+
+export const createExploreService = async (serviceData) => {
+  try {
+    const res = await request('/explore-services', {
+      method: 'POST',
+      body: JSON.stringify(serviceData),
+    });
+    const current = getStoredExploreServices();
+    setStoredExploreServices([res, ...current]);
+    return res;
+  } catch {
+    const newService = {
+      id: `exp-${Date.now()}`,
+      ...serviceData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const current = getStoredExploreServices();
+    const updated = [newService, ...current];
+    setStoredExploreServices(updated);
+    return newService;
+  }
+};
+
+export const updateExploreService = async (id, serviceData) => {
+  if (!id) throw new Error('Explore service ID is required');
+  try {
+    const res = await request(`/explore-services/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(serviceData),
+    });
+    const current = getStoredExploreServices();
+    setStoredExploreServices(current.map(i => i.id === id ? { ...i, ...res } : i));
+    return res;
+  } catch {
+    const current = getStoredExploreServices();
+    const updated = current.map(i => i.id === id ? { ...i, ...serviceData, updatedAt: new Date().toISOString() } : i);
+    setStoredExploreServices(updated);
+    return { id, ...serviceData };
+  }
+};
+
+export const toggleExploreServiceStatus = async (id, isActive) => {
+  if (!id) throw new Error('Explore service ID is required');
+  try {
+    return await request(`/explore-services/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive: Boolean(isActive) }),
+    });
+  } catch {
+    const current = getStoredExploreServices();
+    const updated = current.map(i => i.id === id ? { ...i, isActive: Boolean(isActive) } : i);
+    setStoredExploreServices(updated);
+    return { id, isActive: Boolean(isActive) };
+  }
+};
+
+export const reorderExploreServices = async (items) => {
+  try {
+    return await request('/explore-services/reorder', {
+      method: 'PATCH',
+      body: JSON.stringify({ items }),
+    });
+  } catch {
+    const current = getStoredExploreServices();
+    const orderMap = new Map(items.map(it => [it.id, it.displayOrder]));
+    const updated = current.map(i => orderMap.has(i.id) ? { ...i, displayOrder: orderMap.get(i.id) } : i);
+    updated.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+    setStoredExploreServices(updated);
+    return { status: 'SUCCESS' };
+  }
+};
+
+export const deleteExploreService = async (id, hard = false) => {
+  if (!id) throw new Error('Explore service ID is required');
+  try {
+    return await request(`/explore-services/${encodeURIComponent(id)}?hard=${hard}`, {
+      method: 'DELETE',
+    });
+  } catch {
+    const current = getStoredExploreServices();
+    const updated = hard ? current.filter(i => i.id !== id) : current.map(i => i.id === id ? { ...i, isActive: false } : i);
+    setStoredExploreServices(updated);
+    return { status: 'SUCCESS' };
+  }
 };
 
 // ==========================================
@@ -709,21 +914,36 @@ export const getNotifications = () => {
 // ==========================================
 // Module 11: Bookings & Orders Management
 // ==========================================
+
+// In-memory cache for booking details to prevent overwhelming HTTP connections on frequent sync intervals
+const bookingDetailCache = new Map();
+
 export const getBookingById = async (bookingId) => {
   if (!bookingId) return null;
+  if (bookingDetailCache.has(bookingId)) {
+    return bookingDetailCache.get(bookingId);
+  }
   try {
     const token = getAdminToken();
-    const res = await fetch(`${API_ROOT_URL}/bookings/${bookingId}`, {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(`${API_ROOT_URL}/bookings/${encodeURIComponent(bookingId)}`, {
+      signal: controller.signal,
       headers: {
         'Accept': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
       }
     });
+    clearTimeout(timer);
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      if (data && typeof data === 'object') {
+        bookingDetailCache.set(bookingId, data);
+      }
+      return data;
     }
   } catch (e) {
-    console.warn(`Failed to fetch booking ${bookingId}:`, e.message);
+    // Graceful fallback on connection timeout
   }
   return null;
 };
@@ -739,48 +959,54 @@ export const getBookings = async (suppliedLiveMap) => {
       return [];
     }
 
-    // Hydrate each active booking with full order data (baseAmount, totalAmount, paymentStatus, scheduledAt, pinCode, createdAt, etc.)
-    const hydratedBookings = await Promise.all(
-      rawList.map(async (b) => {
-        const id = b.bookingId || b.id;
-        if (!id) return b;
-        try {
-          const detail = await getBookingById(id);
-          if (detail && typeof detail === 'object') {
-            return {
-              ...b,
-              ...detail,
-              bookingId: id,
-              id: id,
-              customerName: detail.userName || b.customerName || 'Customer',
-              customerPhone: detail.userPhone || b.customerPhone || 'N/A',
-              serviceName: detail.serviceName || b.serviceName || 'Home Service',
-              status: detail.status || b.bookingStatus || 'PENDING',
-              bookingStatus: detail.status || b.bookingStatus || 'PENDING',
-              assignedWorkerId: detail.workerId || b.assignedWorkerId,
-              assignedWorkerName: detail.workerName || b.assignedWorkerName,
-              assignedWorkerPhone: detail.workerPhone || b.assignedWorkerPhone,
-              totalAmount: Number(detail.totalAmount ?? detail.baseAmount ?? b.totalAmount ?? 0),
-              baseAmount: Number(detail.baseAmount ?? detail.totalAmount ?? 0),
-              extraAmount: Number(detail.extraAmount ?? 0),
-              discountAmount: Number(detail.discountAmount ?? 0),
-              paymentStatus: detail.paymentStatus || b.paymentStatus || 'PENDING',
-              paymentMethod: detail.paymentMethod || b.paymentMethod || 'COD',
-              scheduledAt: detail.scheduledAt || b.scheduledAt,
-              pinCode: detail.pinCode || b.pinCode || '-',
-              createdAt: detail.createdAt || b.createdAt || new Date().toISOString(),
-              userLat: detail.userLat ?? b.userLat,
-              userLng: detail.userLng ?? b.userLng
-            };
-          }
-        } catch (err) {
-          console.warn(`Hydration error for booking ${id}:`, err.message);
-        }
-        return b;
-      })
-    );
+    const formatBooking = (b, detail) => {
+      const id = b.bookingId || b.id;
+      const d = detail || {};
+      return {
+        ...b,
+        ...d,
+        bookingId: id,
+        id: id,
+        customerName: d.userName || b.customerName || 'Customer',
+        customerPhone: d.userPhone || b.customerPhone || 'N/A',
+        serviceName: d.serviceName || b.serviceName || 'Home Service',
+        status: d.status || b.bookingStatus || 'PENDING',
+        bookingStatus: d.status || b.bookingStatus || 'PENDING',
+        assignedWorkerId: d.workerId || b.assignedWorkerId,
+        assignedWorkerName: d.workerName || b.assignedWorkerName,
+        assignedWorkerPhone: d.workerPhone || b.assignedWorkerPhone,
+        totalAmount: Number(d.totalAmount ?? d.baseAmount ?? b.totalAmount ?? 0),
+        baseAmount: Number(d.baseAmount ?? d.totalAmount ?? 0),
+        extraAmount: Number(d.extraAmount ?? 0),
+        discountAmount: Number(d.discountAmount ?? 0),
+        paymentStatus: d.paymentStatus || b.paymentStatus || 'PENDING',
+        paymentMethod: d.paymentMethod || b.paymentMethod || 'COD',
+        scheduledAt: d.scheduledAt || b.scheduledAt,
+        pinCode: d.pinCode || b.pinCode || '-',
+        createdAt: d.createdAt || b.createdAt || new Date().toISOString(),
+        userLat: d.userLat ?? b.userLat,
+        userLng: d.userLng ?? b.userLng
+      };
+    };
 
-    return hydratedBookings;
+    // Hydrate in controlled batches of 5 to prevent proxy socket exhaustion and connection reset
+    const results = [];
+    const BATCH_SIZE = 5;
+
+    for (let i = 0; i < rawList.length; i += BATCH_SIZE) {
+      const chunk = rawList.slice(i, i + BATCH_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map(async (b) => {
+          const id = b.bookingId || b.id;
+          if (!id) return formatBooking(b, null);
+          const detail = await getBookingById(id);
+          return formatBooking(b, detail);
+        })
+      );
+      results.push(...chunkResults);
+    }
+
+    return results;
   } catch (err) {
     console.warn('getBookings live-map fetch error:', err.message);
     return [];
@@ -1062,3 +1288,41 @@ export const getFailedDispatchBookings = async () => {
 export const getDispatchHistory = async () => {
   return request('/dispatch/history');
 };
+
+// ==========================================
+// Phase 5/6: Operations, Zone Control & Financials
+// ==========================================
+export const getOpsZones = () => request('/ops/zones');
+
+export const toggleOpsZone = (zoneId, active) =>
+  request(`/ops/zones/${zoneId}/toggle${typeof active === 'boolean' ? `?active=${active}` : ''}`, { method: 'POST' });
+
+export const updateOpsZoneConfig = (zoneId, config) =>
+  request(`/ops/zones/${zoneId}/config`, { method: 'PUT', body: JSON.stringify(config) });
+
+export const forceReassignBooking = (bookingId, workerId, reason = 'Admin manual override', adminUserId = null) =>
+  request(`/ops/bookings/${bookingId}/force-reassign`, {
+    method: 'POST',
+    body: JSON.stringify({ workerId, reason, adminUserId: adminUserId || getAdminUserId() }),
+  });
+
+export const getOpsDisputes = (status = null) =>
+  request(`/ops/disputes${status ? `?status=${status}` : ''}`);
+
+export const resolveOpsDispute = (disputeId, data) =>
+  request(`/ops/disputes/${disputeId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ ...data, adminUserId: data.adminUserId || getAdminUserId() }),
+  });
+
+export const getPendingPayouts = () => request('/ops/payouts/pending');
+
+export const settleBatchPayout = (workerIds = [], idempotencyKey = null) =>
+  request('/ops/payouts/batch-settle', {
+    method: 'POST',
+    body: JSON.stringify({
+      workerIds,
+      idempotencyKey: idempotencyKey || `payout-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      adminUserId: getAdminUserId(),
+    }),
+  });

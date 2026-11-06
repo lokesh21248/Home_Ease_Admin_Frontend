@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, Building2, Check, CheckCircle2, ChevronLeft, ChevronRight,
   Edit2, Hash, Loader2, MapPin, Plus, RefreshCw, Search,
-  Sparkles, Trash2, Upload, X
+  Sparkles, Trash2, Upload, X, Radio, Zap, Shield
 } from 'lucide-react';
 import {
   bulkCreatePincodes, createCity, createPincode, createState,
@@ -10,7 +10,8 @@ import {
   deleteCity, deletePincode, deleteState,
   getCities, getPincodes, getServiceAreaOverview, getStates,
   lookupPincodeLocation,
-  updateCity, updatePincode, updateState
+  updateCity, updatePincode, updateState,
+  getOpsZones, toggleOpsZone, updateOpsZoneConfig
 } from '../api/adminApi';
 
 const getEntityId = (entity, type) => {
@@ -72,6 +73,48 @@ export const Module14ServiceAreas = () => {
   const [bulkJson, setBulkJson] = useState('');
   const [warningDialog, setWarningDialog] = useState(null);
   const [cascadeDelete, setCascadeDelete] = useState(false);
+
+  // Phase 5/6: Zone Operations & Dynamic Weights State
+  const [zones, setZones] = useState([]);
+  const [loadingZones, setLoadingZones] = useState(false);
+  const [editingZone, setEditingZone] = useState(null);
+  const [zoneForm, setZoneForm] = useState({});
+
+  const loadZones = useCallback(async () => {
+    setLoadingZones(true);
+    try {
+      const res = await getOpsZones();
+      const list = Array.isArray(res) ? res : (res?.data || []);
+      setZones(list);
+    } catch (err) {
+      console.warn('Failed to load ops zones:', err);
+    } finally {
+      setLoadingZones(false);
+    }
+  }, []);
+
+  const handleToggleZone = async (zoneId, currentActive) => {
+    try {
+      await toggleOpsZone(zoneId, !currentActive);
+      setNotice(`Zone serviceability toggled to ${!currentActive ? 'ACTIVE' : 'INACTIVE'}`);
+      loadZones();
+    } catch (err) {
+      setError(`Failed to toggle zone: ${err.message}`);
+    }
+  };
+
+  const handleSaveZoneConfig = async (e) => {
+    e.preventDefault();
+    if (!editingZone) return;
+    try {
+      await updateOpsZoneConfig(editingZone.id || editingZone.configId, zoneForm);
+      setNotice(`Zone ${editingZone.zoneName || 'configuration'} updated on database!`);
+      setEditingZone(null);
+      loadZones();
+    } catch (err) {
+      setError(`Failed to update zone: ${err.message}`);
+    }
+  };
 
   const loadDirectory = useCallback(async () => {
     setIsLoading(true);
@@ -491,6 +534,9 @@ export const Module14ServiceAreas = () => {
     setPage(0);
     setNotice('');
     setError('');
+    if (tab === 'zones') {
+      loadZones();
+    }
   };
 
   const statItems = [
@@ -504,7 +550,8 @@ export const Module14ServiceAreas = () => {
   const tabs = [
     { id: 'pincodes', label: 'PIN Codes (Primary Identifier)', icon: Hash },
     { id: 'cities', label: 'Cities', icon: Building2 },
-    { id: 'states', label: 'States', icon: MapPin }
+    { id: 'states', label: 'States', icon: MapPin },
+    { id: 'zones', label: 'Zones & Surge Operations', icon: Radio }
   ];
 
   const filteredStates = states.filter(state => {
@@ -733,8 +780,109 @@ export const Module14ServiceAreas = () => {
         </div>
 
         {/* Table Content */}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-left">
+        {activeTab === 'zones' ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead className="bg-slate-50/80 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                <tr>
+                  <th className="px-5 py-3">Zone & City</th>
+                  <th className="px-5 py-3">Category</th>
+                  <th className="px-5 py-3">Surge</th>
+                  <th className="px-5 py-3">Wave Radii (R1 / R2 / R3)</th>
+                  <th className="px-5 py-3">Speed Limit</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                {loadingZones ? (
+                  <tr>
+                    <td colSpan="7" className="px-5 py-16 text-center text-slate-400">
+                      <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-blue-600" />
+                      Loading operational zones...
+                    </td>
+                  </tr>
+                ) : zones.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-5 py-16 text-center text-slate-400">
+                      <Radio className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+                      <p className="font-semibold text-slate-600">No operational zones found</p>
+                      <p className="text-xs text-slate-400 mt-0.5">DB weights live in assignment_weight_config.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  zones.map((z) => {
+                    const zId = z.zoneId || z.id || z.configId;
+                    const isActive = z.isZoneActive !== false && z.isActive !== false;
+                    return (
+                      <tr key={zId} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-5 py-4">
+                          <div className="font-bold text-slate-900">{z.zoneName || `Zone ${z.zoneId ? String(z.zoneId).slice(0, 8) : ''}`}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{z.cityName || z.zoneId}</div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            {z.categoryName || z.categoryId || 'All Services'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 font-mono">
+                          <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${Number(z.surgeMultiplier || 1.0) > 1.0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>
+                            {Number(z.surgeMultiplier || 1.0).toFixed(2)}x
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 font-mono text-slate-600">
+                          {(z.round1RadiusMeters || 3000) / 1000}km / {(z.round2RadiusMeters || 5000) / 1000}km / {(z.round3RadiusMeters || 8000) / 1000}km
+                        </td>
+                        <td className="px-5 py-4 font-mono text-slate-600">
+                          {z.maxSpeedKmhThreshold || 150} km/h
+                        </td>
+                        <td className="px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleZone(zId, isActive)}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition cursor-pointer ${
+                              isActive
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200'
+                            }`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                            <span>{isActive ? 'Active' : 'Inactive'}</span>
+                          </button>
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingZone(z);
+                              setZoneForm({
+                                surgeMultiplier: z.surgeMultiplier || 1.0,
+                                round1RadiusMeters: z.round1RadiusMeters || 3000,
+                                round2RadiusMeters: z.round2RadiusMeters || 5000,
+                                round3RadiusMeters: z.round3RadiusMeters || 8000,
+                                maxSpeedKmhThreshold: z.maxSpeedKmhThreshold || 150,
+                                distanceWeight: z.distanceWeight || 0.35,
+                                ratingWeight: z.ratingWeight || 0.25,
+                                acceptanceRateWeight: z.acceptanceRateWeight || 0.20,
+                                completionRateWeight: z.completionRateWeight || 0.15,
+                                idleTimeWeight: z.idleTimeWeight || 0.05
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50 transition cursor-pointer"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" /> Configure
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left">
             <thead className="bg-slate-50/80 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
               <tr>
                 {activeTab === 'states' && (
@@ -893,6 +1041,145 @@ export const Module14ServiceAreas = () => {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Edit Zone Configuration Modal */}
+      {editingZone && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Configure Zone Operations & Dynamic Weights</h3>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">{editingZone.zoneName || editingZone.zoneId}</p>
+              </div>
+              <button onClick={() => setEditingZone(null)}><X className="w-5 h-5 text-slate-400 hover:text-slate-600" /></button>
+            </div>
+
+            <form onSubmit={handleSaveZoneConfig} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Surge Multiplier</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="1.0"
+                    max="5.0"
+                    value={zoneForm.surgeMultiplier}
+                    onChange={(e) => setZoneForm({ ...zoneForm, surgeMultiplier: parseFloat(e.target.value) || 1.0 })}
+                    className="w-full mt-1 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Max Speed Limit (km/h)</label>
+                  <input
+                    type="number"
+                    value={zoneForm.maxSpeedKmhThreshold}
+                    onChange={(e) => setZoneForm({ ...zoneForm, maxSpeedKmhThreshold: parseFloat(e.target.value) || 150 })}
+                    className="w-full mt-1 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Wave Radii (Meters)</label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Round 1 (3 km)</span>
+                    <input
+                      type="number"
+                      value={zoneForm.round1RadiusMeters}
+                      onChange={(e) => setZoneForm({ ...zoneForm, round1RadiusMeters: parseInt(e.target.value) || 3000 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Round 2 (5 km)</span>
+                    <input
+                      type="number"
+                      value={zoneForm.round2RadiusMeters}
+                      onChange={(e) => setZoneForm({ ...zoneForm, round2RadiusMeters: parseInt(e.target.value) || 5000 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Round 3 (8 km)</span>
+                    <input
+                      type="number"
+                      value={zoneForm.round3RadiusMeters}
+                      onChange={(e) => setZoneForm({ ...zoneForm, round3RadiusMeters: parseInt(e.target.value) || 8000 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3">
+                <label className="text-xs font-bold text-slate-700">AssignmentScorer Scoring Weights (Sum = 1.0)</label>
+                <div className="grid grid-cols-2 gap-2.5 mt-2">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Distance Weight (0.35)</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={zoneForm.distanceWeight}
+                      onChange={(e) => setZoneForm({ ...zoneForm, distanceWeight: parseFloat(e.target.value) || 0.35 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Rating Weight (0.25)</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={zoneForm.ratingWeight}
+                      onChange={(e) => setZoneForm({ ...zoneForm, ratingWeight: parseFloat(e.target.value) || 0.25 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Acceptance Weight (0.20)</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={zoneForm.acceptanceRateWeight}
+                      onChange={(e) => setZoneForm({ ...zoneForm, acceptanceRateWeight: parseFloat(e.target.value) || 0.20 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold">Completion Weight (0.15)</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={zoneForm.completionRateWeight}
+                      onChange={(e) => setZoneForm({ ...zoneForm, completionRateWeight: parseFloat(e.target.value) || 0.15 })}
+                      className="w-full mt-0.5 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingZone(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-sm"
+                >
+                  Save Dynamic Weights
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
         {/* PIN Codes Pagination */}
         {activeTab === 'pincodes' && (

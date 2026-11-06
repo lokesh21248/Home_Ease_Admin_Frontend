@@ -4,7 +4,7 @@ import {
   ArrowRight, Phone, RefreshCw, Zap, ShieldAlert, CheckCircle, ChevronRight, Layers, FileText, CheckCircle2, XCircle
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { getDispatchLogs, getFailedDispatchBookings } from '../api/adminApi';
+import { getDispatchLogs, getFailedDispatchBookings, forceReassignBooking } from '../api/adminApi';
 
 export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
   const onlineWorkersCount = liveMapData?.totalOnlineWorkers ?? 0;
@@ -17,6 +17,30 @@ export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
   const [failedBookings, setFailedBookings] = useState([]);
   const [activeTab, setActiveTab] = useState('fleet'); // 'fleet' | 'diagnostics'
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Force Reassignment State (Phase 5/6 Rule #3 & #8)
+  const [reassignModalBooking, setReassignModalBooking] = useState(null);
+  const [targetWorkerId, setTargetWorkerId] = useState('');
+  const [reassignReason, setReassignReason] = useState('Manual ops dispatch override');
+  const [isReassigning, setIsReassigning] = useState(false);
+  const [reassignNotice, setReassignNotice] = useState(null);
+
+  const handleForceReassign = async (e) => {
+    e.preventDefault();
+    if (!reassignModalBooking || !targetWorkerId) return;
+    setIsReassigning(true);
+    try {
+      await forceReassignBooking(reassignModalBooking.bookingId, targetWorkerId, reassignReason);
+      setReassignNotice({ type: 'success', text: `Booking #${reassignModalBooking.bookingId.slice(0, 8)} force-reassigned with version guard!` });
+      setReassignModalBooking(null);
+      fetchDiagnostics();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setReassignNotice({ type: 'error', text: `Force reassignment failed: ${err.message}` });
+    } finally {
+      setIsReassigning(false);
+    }
+  };
 
   const fetchDiagnostics = async () => {
     setLoadingLogs(true);
@@ -86,6 +110,15 @@ export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
           </button>
         </div>
       </div>
+
+      {reassignNotice && (
+        <div className={`px-4 py-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+          reassignNotice.type === 'success' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-rose-50 border border-rose-200 text-rose-700'
+        }`}>
+          <span>{reassignNotice.text}</span>
+          <button onClick={() => setReassignNotice(null)}><XCircle className="w-4 h-4" /></button>
+        </div>
+      )}
 
       {activeTab === 'fleet' ? (
         /* Main Grid: Interactive Map Simulation + Job Telemetric Cards */
@@ -241,17 +274,28 @@ export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {failedBookings.map((b) => (
-                  <div key={b.bookingId} className="bg-white p-3.5 rounded-xl border border-rose-100 shadow-xs space-y-1.5">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-slate-900 font-mono">#{b.bookingId.slice(0, 8)}</span>
-                      <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded-md font-semibold">
-                        WORKER_NOT_FOUND
-                      </span>
+                  <div key={b.bookingId} className="bg-white p-3.5 rounded-xl border border-rose-100 shadow-xs space-y-1.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-900 font-mono">#{b.bookingId.slice(0, 8)}</span>
+                        <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded-md font-semibold">
+                          WORKER_NOT_FOUND
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-700 font-medium mt-1">{b.serviceName}</div>
+                      <div className="text-[11px] text-slate-400 font-mono">
+                        Location: {b.customerLat?.toFixed(4)}, {b.customerLng?.toFixed(4)}
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-700 font-medium">{b.serviceName}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Location: {b.customerLat?.toFixed(4)}, {b.customerLng?.toFixed(4)}
-                    </div>
+                    <button
+                      onClick={() => {
+                        setReassignModalBooking(b);
+                        setTargetWorkerId(activeWorkers[0]?.workerId || '');
+                      }}
+                      className="mt-2 w-full py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-lg border border-blue-200 transition"
+                    >
+                      Force Reassign Partner
+                    </button>
                   </div>
                 ))}
               </div>
@@ -361,6 +405,89 @@ export const Module06Dispatch = ({ liveMapData, onRefresh, isRefreshing }) => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Force Reassignment Modal (Phase 5/6 Rule #3 & #8) */}
+      {reassignModalBooking && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Force Reassign Booking</h3>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">#{reassignModalBooking.bookingId}</p>
+              </div>
+              <button onClick={() => setReassignModalBooking(null)}>
+                <XCircle className="w-5 h-5 text-slate-400 hover:text-slate-600" />
+              </button>
+            </div>
+
+            <form onSubmit={handleForceReassign} className="space-y-3.5">
+              <div>
+                <label className="text-xs font-bold text-slate-700">Select Available Fleet Partner</label>
+                {activeWorkers.length > 0 ? (
+                  <select
+                    value={targetWorkerId}
+                    onChange={(e) => setTargetWorkerId(e.target.value)}
+                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    required
+                  >
+                    <option value="">-- Choose Partner --</option>
+                    {activeWorkers.map((w) => (
+                      <option key={w.workerId} value={w.workerId}>
+                        {w.workerName || w.name || 'Partner'} ({w.workerId.slice(0, 8)}) - {w.status || 'ONLINE'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={targetWorkerId}
+                    onChange={(e) => setTargetWorkerId(e.target.value)}
+                    placeholder="Enter Worker UUID..."
+                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold"
+                    required
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Audit Justification Reason</label>
+                <textarea
+                  rows={2}
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                  placeholder="Reason for manual dispatch override..."
+                  required
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 space-y-1">
+                <div className="font-bold flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-700" /> System Guard Notice (Rule #3 & #8)
+                </div>
+                <div>Executes under <code className="bg-amber-100 px-1 rounded">pg_advisory_xact_lock</code>, increments booking version, logs to audit table, and broadcasts over STOMP WebSocket.</div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setReassignModalBooking(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isReassigning}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-sm"
+                >
+                  {isReassigning ? 'Reassigning...' : 'Confirm Reassignment'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
