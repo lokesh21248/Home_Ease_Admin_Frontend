@@ -1,22 +1,22 @@
 import React, { useState } from 'react';
-import { 
-  Home, Calendar, Users, Truck, User, BarChart3, FileText, 
-  Wrench, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, 
-  Lock, Image, Tag, Bell, CreditCard, X, Settings, MapPin
+import {
+  Home, Calendar, Users, Truck, User, BarChart3, FileText,
+  Wrench, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
+  Lock, Image, Tag, Bell, CreditCard, X, Settings, MapPin, Sparkles
 } from 'lucide-react';
 
-export const Sidebar = ({ 
-  activeModule, 
-  setActiveModule, 
-  isCollapsed, 
-  setIsCollapsed, 
+export const Sidebar = ({
+  activeModule,
+  setActiveModule,
+  isCollapsed,
+  setIsCollapsed,
   isMobileOpen = false,
   setIsMobileOpen,
   currentRole: _currentRole,
-  onLogout 
+  onLogout
 }) => {
   // Services submenu is open if either categories or sub-services is active
-  const isServicesActive = activeModule === 'categories' || activeModule === 'sub-services' || activeModule === 'service-areas';
+  const isServicesActive = activeModule === 'categories' || activeModule === 'sub-services' || activeModule === 'service-areas' || activeModule === 'explore-services';
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
 
   const handleNavClick = (id) => {
@@ -54,14 +54,14 @@ export const Sidebar = ({
     <>
       {/* Mobile Drawer Backdrop Overlay */}
       {isMobileOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-40 lg:hidden transition-opacity duration-300"
           onClick={() => setIsMobileOpen && setIsMobileOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      <aside 
+      <aside
         className={`fixed top-0 left-0 h-screen bg-[#070D18] text-slate-300 z-50 transition-all duration-300 flex flex-col border-r border-slate-800/80 shadow-2xl select-none 
           w-72 max-w-[85vw] ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} 
           lg:translate-x-0 lg:z-30 ${isCollapsed ? 'lg:w-20' : 'lg:w-64'}
@@ -90,7 +90,7 @@ export const Sidebar = ({
           </div>
 
           {/* Desktop Collapse Toggle */}
-          <button 
+          <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             className="hidden lg:flex p-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
             title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
@@ -99,7 +99,7 @@ export const Sidebar = ({
           </button>
 
           {/* Mobile Close Button */}
-          <button 
+          <button
             onClick={() => setIsMobileOpen && setIsMobileOpen(false)}
             className="lg:hidden p-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
             title="Close Navigation Menu"
@@ -110,7 +110,7 @@ export const Sidebar = ({
 
         {/* Navigation List */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          
+
           {/* Core Nav Items */}
           {mainNavItems.map((item) => {
             const Icon = item.icon;
@@ -120,11 +120,10 @@ export const Sidebar = ({
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
-                  isActive 
-                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20' 
+                className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${isActive
+                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 font-medium'
-                }`}
+                  }`}
                 title={!showLabels ? item.label : undefined}
               >
                 <Icon className="w-4 h-4 flex-shrink-0" />
@@ -145,18 +144,17 @@ export const Sidebar = ({
                   handleNavClick('categories');
                 }
               }}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
-                isServicesActive 
-                  ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20' 
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${isServicesActive
+                  ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20'
                   : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 font-medium'
-              }`}
+                }`}
               title="Services"
             >
               <div className="flex items-center gap-3.5 min-w-0">
                 <Wrench className="w-4 h-4 flex-shrink-0" />
                 {showLabels && <span className="truncate">Services</span>}
               </div>
-              
+
               {showLabels && (
                 isServicesExpanded ? <ChevronUp className="w-3.5 h-3.5 text-white/80" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
               )}
@@ -168,11 +166,10 @@ export const Sidebar = ({
                 {/* Master Categories */}
                 <button
                   onClick={() => handleNavClick('categories')}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
-                    activeModule === 'categories'
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${activeModule === 'categories'
                       ? 'bg-[#0F1E36] text-blue-400 font-bold border border-blue-500/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                  }`}
+                    }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                   <span className="truncate">Master Categories</span>
@@ -181,23 +178,33 @@ export const Sidebar = ({
                 {/* Sub-Services */}
                 <button
                   onClick={() => handleNavClick('sub-services')}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
-                    activeModule === 'sub-services'
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${activeModule === 'sub-services'
                       ? 'bg-[#0F1E36] text-blue-400 font-bold border border-blue-500/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                  }`}
+                    }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
                   <span className="truncate">Sub-Services</span>
                 </button>
 
+                {/* Explore Services */}
                 <button
-                  onClick={() => handleNavClick('service-areas')}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
-                    activeModule === 'service-areas'
+                  onClick={() => handleNavClick('explore-services')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${activeModule === 'explore-services'
                       ? 'bg-[#0F1E36] text-blue-400 font-bold border border-blue-500/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                  }`}
+                    }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="truncate">Explore Services</span>
+                </button>
+
+                <button
+                  onClick={() => handleNavClick('service-areas')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${activeModule === 'service-areas'
+                      ? 'bg-[#0F1E36] text-blue-400 font-bold border border-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    }`}
                 >
                   <MapPin className="w-3.5 h-3.5" />
                   <span className="truncate">Service Areas</span>
@@ -222,11 +229,10 @@ export const Sidebar = ({
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
-                  isActive 
-                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20' 
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${isActive
+                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 font-medium'
-                }`}
+                  }`}
                 title={!showLabels ? item.label : undefined}
               >
                 <div className="flex items-center gap-3.5 min-w-0">
@@ -251,11 +257,10 @@ export const Sidebar = ({
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
-                  isActive 
-                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20' 
+                className={`w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${isActive
+                    ? 'bg-[#1D68F2] text-white font-bold shadow-md shadow-blue-500/20'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 font-medium'
-                }`}
+                  }`}
                 title={!showLabels ? item.label : undefined}
               >
                 <Icon className="w-4 h-4 flex-shrink-0" />
@@ -271,9 +276,8 @@ export const Sidebar = ({
           <div className="px-3 py-2 border-t border-slate-800/80 bg-[#050A14]">
             <button
               onClick={onLogout}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition border border-transparent hover:border-rose-500/20 cursor-pointer ${
-                !showLabels ? 'justify-center' : ''
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition border border-transparent hover:border-rose-500/20 cursor-pointer ${!showLabels ? 'justify-center' : ''
+                }`}
               title="Lock Session / Sign Out"
             >
               <Lock className="w-4 h-4 text-slate-400" />

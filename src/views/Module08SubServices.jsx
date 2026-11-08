@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, Clock, UploadCloud, X, Check, 
-  IndianRupee, Package, Layers, ChevronDown, ChevronLeft, ChevronRight, Loader2, ImageOff
+  IndianRupee, Package, Layers, ChevronDown, ChevronLeft, ChevronRight, Loader2, ImageOff,
+  RotateCcw, AlertCircle
 } from 'lucide-react';
 import { createSubService, updateSubService, deleteSubService, uploadSubServiceImage } from '../api/adminApi';
 
@@ -22,14 +23,18 @@ export const Module08SubServices = ({ subServices = [], setSubServices, categori
         imageUrl: s.imageUrl || '',
         imageFileName: s.imageFileName || '',
         imageMeta: s.imageMeta || '',
-        isActive: s.isActive !== undefined ? s.isActive : true
+        isActive: s.isActive !== undefined ? Boolean(s.isActive) : true
       }))
     : [];
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ACTIVE'); // 'ACTIVE' | 'INACTIVE' | 'ALL'
   const [selectedRowIds, setSelectedRowIds] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+  const [tableFeedback, setTableFeedback] = useState(null);
 
   // Drawer / Side Panel State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -73,15 +78,51 @@ const UNIT_PRESETS = [
     return Array.from(new Set(categories.map(c => c?.name?.trim()).filter(Boolean)));
   }, [categories]);
 
-  // Filter logic
-  const filteredSubs = effectiveSubServices.filter(item => {
-    const matchesSearch = (item.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.categoryName || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesCat = selectedCategoryFilter === 'ALL' || item.categoryName === selectedCategoryFilter;
-    return matchesSearch && matchesCat;
-  });
+  // Feedback toast helper
+  const showFeedback = (type, text) => {
+    setTableFeedback({ type, text });
+    setTimeout(() => {
+      setTableFeedback((prev) => (prev?.text === text ? null : prev));
+    }, 4000);
+  };
+
+  // Status counts for badge tabs
+  const activeCount = useMemo(() => effectiveSubServices.filter(s => s.isActive !== false).length, [effectiveSubServices]);
+  const inactiveCount = useMemo(() => effectiveSubServices.filter(s => s.isActive === false).length, [effectiveSubServices]);
+  const totalCount = effectiveSubServices.length;
+
+  // Filter logic (respects Category, Search, AND Active/Inactive Status)
+  const filteredSubs = useMemo(() => {
+    return effectiveSubServices.filter(item => {
+      const matchesSearch = (item.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.categoryName || '').toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesCat = selectedCategoryFilter === 'ALL' || item.categoryName === selectedCategoryFilter;
+      
+      const itemActive = item.isActive !== false;
+      const matchesStatus = 
+        filterStatus === 'ALL' ? true :
+        filterStatus === 'ACTIVE' ? itemActive :
+        !itemActive;
+
+      return matchesSearch && matchesCat && matchesStatus;
+    });
+  }, [effectiveSubServices, searchQuery, selectedCategoryFilter, filterStatus]);
+
+  // Reset pagination when filter criteria change
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedRowIds([]);
+  }, [searchQuery, selectedCategoryFilter, filterStatus]);
+
+  // Paginated records for table view
+  const totalPages = Math.max(1, Math.ceil(filteredSubs.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedSubs = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredSubs.slice(start, start + pageSize);
+  }, [filteredSubs, safeCurrentPage, pageSize]);
 
   // Open Drawer in Edit Mode
   const handleOpenEdit = (item) => {
@@ -120,39 +161,96 @@ const UNIT_PRESETS = [
     setIsDrawerOpen(true);
   };
 
-  // Toggle Active on Row
-  const handleToggleRowActive = (id) => {
+  // Toggle Active on Row (persisted to live backend)
+  const handleToggleRowActive = async (item) => {
+    const id = item.subServiceId || item.id;
+    const currentActive = item.isActive !== false;
+    const nextActive = !currentActive;
+
+    // Optimistic local state update
     setSubServices(prev => {
       const list = prev && prev.length > 0 ? prev : [];
-      return list.map(item => {
-        const matchId = item.subServiceId || item.id;
+      return list.map(s => {
+        const matchId = s.subServiceId || s.id;
         if (matchId === id) {
-          const nextActive = !(item.isActive !== undefined ? item.isActive : true);
-          return { ...item, isActive: nextActive };
+          return { ...s, isActive: nextActive };
         }
-        return item;
+        return s;
       });
     });
+
+    try {
+      if (!nextActive) {
+        await deleteSubService(id);
+        showFeedback('success', `"${item.name}" deactivated and archived.`);
+      } else {
+        const parentCat = categories.find(c => c.name === item.categoryName || c.serviceId === item.serviceId);
+        const parentId = parentCat?.serviceId || parentCat?.id || item.serviceId || item.service?.serviceId;
+        await updateSubService(id, {
+          name: item.name,
+          pricingType: item.pricingType || 'FIXED',
+          basePrice: item.basePrice || 0,
+          unitLabel: item.unitLabel || 'per service',
+          estimatedMins: item.estimatedMins || 60,
+          imageUrl: item.imageUrl || '',
+          isActive: true,
+          ...(parentId ? { service: { serviceId: parentId } } : {})
+        });
+        showFeedback('success', `"${item.name}" restored and activated!`);
+      }
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Status toggle error:', err.message);
+      // Revert optimistic update
+      setSubServices(prev => {
+        const list = prev && prev.length > 0 ? prev : [];
+        return list.map(s => {
+          const matchId = s.subServiceId || s.id;
+          if (matchId === id) {
+            return { ...s, isActive: currentActive };
+          }
+          return s;
+        });
+      });
+      showFeedback('error', `Failed to update status: ${err.message}`);
+    }
   };
 
-  // Delete Row
+  // Delete Row (soft deletes and immediately removes from active list)
   const handleDeleteRow = async (item) => {
     const id = item.subServiceId || item.id;
-    if (!window.confirm(`Are you sure you want to delete "${item.name}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete "${item.name}"? This sub-service will be deactivated and archived.`)) return;
 
+    // Optimistically update local state so row immediately leaves the Active view
     setSubServices(prev => {
       const list = prev && prev.length > 0 ? prev : [];
-      return list.filter(s => (s.subServiceId !== id && s.id !== id));
+      return list.map(s => {
+        const matchId = s.subServiceId || s.id;
+        if (matchId === id) {
+          return { ...s, isActive: false };
+        }
+        return s;
+      });
     });
 
     try {
       await deleteSubService(id);
-      setFeedbackMsg(`"${item.name}" deleted successfully!`);
+      showFeedback('success', `"${item.name}" deleted successfully!`);
       if (onRefresh) onRefresh();
     } catch (err) {
-      console.warn('Backend delete note:', err.message);
-    } finally {
-      setTimeout(() => setFeedbackMsg(null), 3000);
+      console.error('Backend delete error:', err.message);
+      // Revert on error
+      setSubServices(prev => {
+        const list = prev && prev.length > 0 ? prev : [];
+        return list.map(s => {
+          const matchId = s.subServiceId || s.id;
+          if (matchId === id) {
+            return { ...s, isActive: true };
+          }
+          return s;
+        });
+      });
+      showFeedback('error', `Failed to delete: ${err.message}`);
     }
   };
 
@@ -319,55 +417,132 @@ const UNIT_PRESETS = [
           </p>
         </div>
 
-        {/* Toolbar: Category Filter Dropdown, Search Input, & Add Sub-Service Button */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          
-          {/* Left: Category Dropdown & Search */}
-          <div className="flex flex-wrap items-center gap-3 flex-1">
-            
-            {/* Filter by Category Dropdown */}
+        {/* Top-Level Status Feedback Alert */}
+        {tableFeedback && (
+          <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shadow-xs transition-all ${
+            tableFeedback.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-600 whitespace-nowrap hidden sm:inline">
-                Filter by Category:
+              {tableFeedback.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              ) : (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              )}
+              <span>{tableFeedback.text}</span>
+            </div>
+            <button 
+              onClick={() => setTableFeedback(null)}
+              className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Toolbar: Category Filter Dropdown, Search Input, Status Tabs, & Add Sub-Service Button */}
+        <div className="flex flex-col gap-3">
+          
+          {/* Top Bar: Status Tabs (Active / Inactive / All) */}
+          <div className="flex items-center gap-1 p-1 bg-white border border-slate-200 rounded-xl shadow-2xs w-fit">
+            <button
+              onClick={() => setFilterStatus('ACTIVE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                filterStatus === 'ACTIVE'
+                  ? 'bg-[#1D68F2] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <span>Active</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                filterStatus === 'ACTIVE' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-600 border border-emerald-200/60'
+              }`}>
+                {activeCount}
               </span>
-              <div className="relative">
-                <select
-                  value={selectedCategoryFilter}
-                  onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-                  className="pl-3.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition shadow-2xs appearance-none cursor-pointer"
-                >
-                  <option value="ALL">All Categories</option>
-                  {categoryOptions.map((cat, idx) => (
-                    <option key={`filter-cat-${cat}-${idx}`} value={cat}>{cat}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Search Input */}
-            <div className="relative flex-1 max-w-xs min-w-[200px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input 
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search sub-services..."
-                className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition shadow-2xs"
-              />
-            </div>
-
+            </button>
+            <button
+              onClick={() => setFilterStatus('INACTIVE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                filterStatus === 'INACTIVE'
+                  ? 'bg-[#1D68F2] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <span>Inactive / Archived</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                filterStatus === 'INACTIVE' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {inactiveCount}
+              </span>
+            </button>
+            <button
+              onClick={() => setFilterStatus('ALL')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                filterStatus === 'ALL'
+                  ? 'bg-[#1D68F2] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <span>All</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                filterStatus === 'ALL' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {totalCount}
+              </span>
+            </button>
           </div>
 
-          {/* Right: + Add Sub-Service Button */}
-          <button
-            onClick={handleOpenNew}
-            className="px-4 py-2 bg-[#1D68F2] hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer self-end sm:self-auto"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Add Sub-Service</span>
-          </button>
+          {/* Search, Category Selector & Action Button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            
+            {/* Left: Category Dropdown & Search */}
+            <div className="flex flex-wrap items-center gap-3 flex-1">
+              
+              {/* Filter by Category Dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600 whitespace-nowrap hidden sm:inline">
+                  Filter by Category:
+                </span>
+                <div className="relative">
+                  <select
+                    value={selectedCategoryFilter}
+                    onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                    className="pl-3.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition shadow-2xs appearance-none cursor-pointer"
+                  >
+                    <option value="ALL">All Categories</option>
+                    {categoryOptions.map((cat, idx) => (
+                      <option key={`filter-cat-${cat}-${idx}`} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
 
+              {/* Search Input */}
+              <div className="relative flex-1 max-w-xs min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input 
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search sub-services..."
+                  className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition shadow-2xs"
+                />
+              </div>
+
+            </div>
+
+            {/* Right: + Add Sub-Service Button */}
+            <button
+              onClick={handleOpenNew}
+              className="px-4 py-2 bg-[#1D68F2] hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer self-end sm:self-auto"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <span>Add Sub-Service</span>
+            </button>
+
+          </div>
         </div>
 
         {/* Sub-Services Data Table (matching reference screenshot) */}
@@ -396,19 +571,27 @@ const UNIT_PRESETS = [
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-            {filteredSubs.length === 0 && (
+            {paginatedSubs.length === 0 && (
               <tr>
-                <td colSpan="7" className="py-12 text-center text-slate-400">
+                <td colSpan="10" className="py-12 text-center text-slate-400">
                   <Package className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                  <div className="font-semibold text-slate-600">No sub-services configured</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Click "New Sub-Service" to define itemized services or sync with backend.</div>
+                  <div className="font-semibold text-slate-600">
+                    {filterStatus === 'INACTIVE' 
+                      ? 'No inactive or archived sub-services' 
+                      : 'No sub-services match the selected filters'}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {filterStatus === 'INACTIVE'
+                      ? 'Deleted or deactivated sub-services will be listed here for archiving and recovery.'
+                      : 'Try modifying your search or click "Add Sub-Service" to create a new one.'}
+                  </div>
                 </td>
               </tr>
             )}
-                {filteredSubs.map((item, idx) => {
+                {paginatedSubs.map((item, idx) => {
                   const id = item.subServiceId || item.id || `sub-${idx}`;
                   const isChecked = selectedRowIds.includes(id);
-                  const isActive = item.isActive !== undefined ? item.isActive : true;
+                  const isActive = item.isActive !== false;
 
                   return (
                     <tr 
@@ -492,10 +675,12 @@ const UNIT_PRESETS = [
                       {/* Active Toggle Switch */}
                       <td className="py-3 px-4 text-center">
                         <button
-                          onClick={() => handleToggleRowActive(id)}
+                          type="button"
+                          onClick={() => handleToggleRowActive(item)}
                           className={`w-10 h-5 inline-flex items-center rounded-full p-0.5 transition cursor-pointer ${
                             isActive ? 'bg-[#1D68F2]' : 'bg-slate-300'
                           }`}
+                          title={isActive ? 'Click to deactivate' : 'Click to reactivate'}
                         >
                           <div 
                             className={`bg-white w-4 h-4 rounded-full shadow-md transform transition ${
@@ -505,7 +690,7 @@ const UNIT_PRESETS = [
                         </button>
                       </td>
 
-                      {/* Actions (Edit Pencil + Delete Trash) */}
+                      {/* Actions (Edit Pencil + Delete Trash / Restore) */}
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
@@ -515,13 +700,24 @@ const UNIT_PRESETS = [
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleDeleteRow(item)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                            title="Delete Sub-Service"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {isActive ? (
+                            <button
+                              onClick={() => handleDeleteRow(item)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                              title="Delete Sub-Service"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleToggleRowActive(item)}
+                              className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-50 transition cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                              title="Restore Sub-Service"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Restore</span>
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -537,32 +733,42 @@ const UNIT_PRESETS = [
             <div>
               {filteredSubs.length === 0 
                 ? 'Showing 0 sub-services' 
-                : `Showing 1-${Math.min(10, filteredSubs.length)} of ${filteredSubs.length} sub-services`}
+                : `Showing ${((safeCurrentPage - 1) * pageSize) + 1}-${Math.min(safeCurrentPage * pageSize, filteredSubs.length)} of ${filteredSubs.length} sub-services`}
             </div>
 
-            <div className="flex items-center gap-1">
-              <button className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-400 cursor-pointer disabled:opacity-50">
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <button className="w-7 h-7 rounded-lg bg-[#1D68F2] text-white font-bold flex items-center justify-center shadow-xs">
-                1
-              </button>
-              <button className="w-7 h-7 rounded-lg hover:bg-slate-50 text-slate-600 font-medium flex items-center justify-center cursor-pointer">
-                2
-              </button>
-              <button className="w-7 h-7 rounded-lg hover:bg-slate-50 text-slate-600 font-medium flex items-center justify-center cursor-pointer">
-                3
-              </button>
-              <button className="w-7 h-7 rounded-lg hover:bg-slate-50 text-slate-600 font-medium flex items-center justify-center cursor-pointer">
-                4
-              </button>
-              <button className="w-7 h-7 rounded-lg hover:bg-slate-50 text-slate-600 font-medium flex items-center justify-center cursor-pointer">
-                5
-              </button>
-              <button className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 cursor-pointer">
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={safeCurrentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-40 disabled:pointer-events-none cursor-pointer transition"
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button 
+                    key={`page-${page}`}
+                    onClick={() => setCurrentPage(page)}
+                    className={`w-7 h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition cursor-pointer ${
+                      safeCurrentPage === page
+                        ? 'bg-[#1D68F2] text-white shadow-xs'
+                        : 'hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safeCurrentPage === totalPages}
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-40 disabled:pointer-events-none cursor-pointer transition"
+                  title="Next Page"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
         </div>

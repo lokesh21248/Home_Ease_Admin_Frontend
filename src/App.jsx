@@ -37,6 +37,7 @@ import { Module11Promotions } from './views/Module11Promotions';
 import { Module12Notifications } from './views/Module12Notifications';
 import { Module13Settings } from './views/Module13Settings';
 import { Module14ServiceAreas } from './views/Module14ServiceAreas';
+import { Module16ExploreServices } from './views/Module16ExploreServices';
 
 const isAdminAuthenticated = () => {
   if (typeof window === 'undefined') return false;
@@ -399,6 +400,14 @@ export default function App() {
               setSubServices={setSubServices}
               categories={categories}
               onRefresh={syncAllLiveData}
+            />
+          )}
+
+          {activeModule === 'explore-services' && (
+            <Module16ExploreServices 
+              categories={categories}
+              onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
             />
           )}
 
