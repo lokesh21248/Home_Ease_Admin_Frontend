@@ -396,32 +396,7 @@ export const adminLogin = async (email, password, remember = false) => {
     }
   }
 
-  const isKnownDemoAdmin =
-    (cleanEmail === 'admin@homeease.com' || cleanEmail === 'admin') &&
-    (cleanPassword === 'AdminPassword123!' || cleanPassword === 'admin');
-
-  if (isKnownDemoAdmin) {
-    const demoToken =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJ1c2VySWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJyb2xlIjoiQURNSU4iLCJwaG9uZU51bWJlciI6Iis5MTAwMDAwMDAwMDAiLCJmdWxsTmFtZSI6IlN5c3RlbSBBZG1pbiIsImlhdCI6MTc5MzExMjMzMywiZXhwIjoxNzk1NzA0MzMzfQ.GenEk-h7uRTvKXujlV5ru5KpP2i5pW_bgBKXIemNVMk';
-    const demoData = {
-      token: demoToken,
-      userId: '00000000-0000-0000-0000-000000000001',
-      fullName: 'System Admin',
-      email: 'admin@homeease.com',
-      role: 'ADMIN',
-      isVerified: true,
-    };
-
-    setAdminToken(demoToken, remember);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
-      if (remember) {
-        localStorage.setItem('homeease_admin_user_id', '00000000-0000-0000-0000-000000000001');
-      }
-    }
-    return { token: demoToken, data: demoData };
-  }
-
+  // Demo token fallback removed — real admin login via /api/v1/admin/auth/login is required.
   const message = lastError?.message || 'Login failed. Please verify your credentials.';
   throw new Error(message);
 };
@@ -541,10 +516,10 @@ export const updateSubService = (subServiceId, subServiceData) => {
   });
 };
 
-export const deleteSubService = (subServiceId) => {
+export const deleteSubService = (subServiceId, hard = false) => {
   const id = typeof subServiceId === 'object' ? (subServiceId?.subServiceId || subServiceId?.id) : subServiceId;
   if (!id) throw new Error('Sub-service ID is required');
-  return request(`/sub-services/${encodeURIComponent(id)}`, {
+  return request(`/sub-services/${encodeURIComponent(id)}${hard ? '?hard=true' : ''}`, {
     method: 'DELETE',
   });
 };
@@ -766,6 +741,13 @@ export const verifyWorkerKYC = (workerId) => {
   });
 };
 
+export const rejectWorkerKYC = (workerId, reason = '') => {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+  return request(`/workers/${workerId}/reject-kyc${query}`, {
+    method: 'PUT',
+  });
+};
+
 export const blockWorker = (workerId, hours = 24) => {
   return request(`/workers/${workerId}/block?hours=${hours}`, {
     method: 'PUT',
@@ -774,6 +756,13 @@ export const blockWorker = (workerId, hours = 24) => {
 
 export const unblockWorker = (workerId) => {
   return request(`/workers/${workerId}/unblock`, {
+    method: 'PUT',
+  });
+};
+
+export const updateWorkerQualifications = (workerId, workingPincodes = '') => {
+  const query = workingPincodes ? `?workingPincodes=${encodeURIComponent(workingPincodes)}` : '';
+  return request(`/workers/${workerId}/qualifications${query}`, {
     method: 'PUT',
   });
 };
@@ -1289,6 +1278,17 @@ export const getDispatchHistory = async () => {
   return request('/dispatch/history');
 };
 
+export const getActiveWaves = () => request('/dispatch/active-waves');
+
+export const retryDispatch = (bookingId) =>
+  request(`/dispatch/retry/${bookingId}`, { method: 'POST' });
+
+export const getCandidatesForBooking = (bookingId) =>
+  request(`/dispatch/candidates/${bookingId}`);
+
+export const cancelDispatch = (bookingId, reason = 'Cancelled by ops admin') =>
+  request(`/dispatch/cancel/${bookingId}`, { method: 'POST', body: JSON.stringify({ reason }) });
+
 // ==========================================
 // Phase 5/6: Operations, Zone Control & Financials
 // ==========================================
@@ -1309,6 +1309,12 @@ export const forceReassignBooking = (bookingId, workerId, reason = 'Admin manual
 export const getOpsDisputes = (status = null) =>
   request(`/ops/disputes${status ? `?status=${status}` : ''}`);
 
+export const createOpsDispute = (data) =>
+  request('/ops/disputes', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, raisedByUserId: data.raisedByUserId || getAdminUserId() }),
+  });
+
 export const resolveOpsDispute = (disputeId, data) =>
   request(`/ops/disputes/${disputeId}/resolve`, {
     method: 'POST',
@@ -1326,3 +1332,91 @@ export const settleBatchPayout = (workerIds = [], idempotencyKey = null) =>
       adminUserId: getAdminUserId(),
     }),
   });
+
+// ==========================================
+// Module: Admin Calendar, Schedules & Slots Capacity
+// ==========================================
+export const getCalendarEvents = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return request(`/calendar/events${query ? `?${query}` : ''}`);
+};
+
+export const getCalendarSummary = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return request(`/calendar/summary${query ? `?${query}` : ''}`);
+};
+
+export const getCalendarAvailability = (date) =>
+  request(`/calendar/availability?date=${encodeURIComponent(date)}`);
+
+export const getWorkingHours = (serviceId = null) =>
+  request(`/calendar/working-hours${serviceId ? `?serviceId=${serviceId}` : ''}`);
+
+export const updateWorkingHours = (hoursList, serviceId = null) => {
+  const payload = Array.isArray(hoursList)
+    ? { serviceId, schedules: hoursList }
+    : hoursList;
+  return request('/calendar/working-hours', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+};
+
+export const rescheduleCalendarBooking = (bookingId, newScheduledAt, reason = 'Admin reschedule', workerId = null) =>
+  request(`/calendar/bookings/${bookingId}/reschedule`, {
+    method: 'PUT',
+    body: JSON.stringify({ newScheduledAt, reason, workerId }),
+  });
+
+export const assignCalendarWorker = (bookingId, workerId, reason = 'Admin worker assignment') =>
+  request(`/calendar/bookings/${bookingId}/assign-worker`, {
+    method: 'PUT',
+    body: JSON.stringify({ workerId, reason }),
+  });
+
+export const copyWorkingHours = (sourceDay, targetDays, serviceId = null) =>
+  request('/calendar/working-hours/copy', {
+    method: 'POST',
+    body: JSON.stringify({ sourceDay, targetDays, serviceId }),
+  });
+
+export const getDateOverrides = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return request(`/calendar/date-overrides${query ? `?${query}` : ''}`);
+};
+
+export const createDateOverride = (data) =>
+  request('/calendar/date-overrides', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateDateOverride = (overrideId, data) =>
+  request(`/calendar/date-overrides/${overrideId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+
+export const deleteDateOverride = (overrideId) =>
+  request(`/calendar/date-overrides/${overrideId}`, { method: 'DELETE' });
+
+export const getCalendarSlots = (date, serviceId = null) => {
+  let url = `/calendar/slots?date=${encodeURIComponent(date)}`;
+  if (serviceId) url += `&serviceId=${serviceId}`;
+  return request(url);
+};
+
+export const getBookingSettings = () =>
+  request('/calendar/settings');
+
+export const updateBookingSettings = (settings) =>
+  request('/calendar/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+
+export const getCalendarAuditLogs = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return request(`/calendar/audit-logs${query ? `?${query}` : ''}`);
+};
+
