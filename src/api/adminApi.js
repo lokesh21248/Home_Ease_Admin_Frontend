@@ -1,6 +1,6 @@
 /**
  * HomeEase Admin Panel — Live Backend API Client
- * Base URL: http://3.107.161.126:8080 (AWS Live Cloud Server)
+ * Base URL: http://3.108.55.219 (AWS Live Cloud Server)
  */
 
 const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL || '';
@@ -13,7 +13,7 @@ export const API_BASE_URL = (() => {
   if (typeof window !== 'undefined') {
     return '/api/v1/admin';
   }
-  return 'http://3.107.161.126:8080/api/v1/admin';
+  return 'http://3.108.55.219/api/v1/admin';
 })();
 
 export const API_ROOT_URL = API_BASE_URL.replace(/\/admin\/?$/, '');

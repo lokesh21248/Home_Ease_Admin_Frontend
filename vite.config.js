@@ -41,12 +41,12 @@ function exploreServicesDevPlugin() {
           pathname === '/upload/explore-service-image'
         ) {
           const proxyReq = http.request(
-            'http://3.108.55.219:8080/api/v1/upload/service-image',
+            'http://3.108.55.219/api/v1/upload/service-image',
             {
               method: req.method,
               headers: {
                 ...req.headers,
-                host: '3.108.55.219:8080',
+                host: '3.108.55.219',
               },
             },
             (proxyRes) => {
@@ -243,7 +243,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://3.108.55.219:8080',
+        target: 'http://3.108.55.219',
         changeOrigin: true,
         secure: false,
         timeout: 30000,
@@ -255,7 +255,7 @@ export default defineConfig({
         },
       },
       '/upload': {
-        target: 'http://3.108.55.219:8080',
+        target: 'http://3.108.55.219',
         changeOrigin: true,
         secure: false,
         timeout: 30000,
