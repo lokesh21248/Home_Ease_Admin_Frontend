@@ -409,6 +409,40 @@ export const Module16ExploreServices = ({ categories = [], onRefresh, onNavigate
         </div>
       </div>
 
+      {/* ========================================================================= */}
+      {/* CATALOG UNIFIED NAVIGATION HUB (Master, Sub-services, Explore Services)   */}
+      {/* ========================================================================= */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-2 shadow-2xs flex flex-wrap items-center gap-1.5 overflow-x-auto">
+        <button
+          onClick={() => onNavigateModule && onNavigateModule('categories')}
+          className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+        >
+          <Layers className="w-3.5 h-3.5 text-slate-400" />
+          <span>Master Categories</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+            {categories.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => onNavigateModule && onNavigateModule('sub-services')}
+          className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+        >
+          <Tag className="w-3.5 h-3.5 text-slate-400" />
+          <span>Sub-Services & Packages</span>
+        </button>
+
+        <button
+          className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap bg-[#1D68F2] text-white shadow-xs"
+        >
+          <Smartphone className="w-3.5 h-3.5 text-white" />
+          <span>Explore Services (Mobile Home)</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white">
+            {totalCount}
+          </span>
+        </button>
+      </div>
+
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">

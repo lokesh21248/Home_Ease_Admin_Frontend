@@ -28,6 +28,7 @@ import { Module03KYC } from './views/Module03KYC';
 import { Module04Workers } from './views/Module04Workers';
 import { Module05Customers } from './views/Module05Customers';
 import { Module06Dispatch } from './views/Module06Dispatch';
+import { Module06DispatchManagement } from './views/Module06DispatchManagement';
 import { Module07Categories } from './views/Module07Categories';
 import { Module08SubServices } from './views/Module08SubServices';
 import { Module09Financials } from './views/Module09Financials';
@@ -37,7 +38,9 @@ import { Module11Promotions } from './views/Module11Promotions';
 import { Module12Notifications } from './views/Module12Notifications';
 import { Module13Settings } from './views/Module13Settings';
 import { Module14ServiceAreas } from './views/Module14ServiceAreas';
+import { Module15ScheduleSlots } from './views/Module15ScheduleSlots';
 import { Module16ExploreServices } from './views/Module16ExploreServices';
+import { Module17SupportComplaints } from './views/Module17SupportComplaints';
 
 const isAdminAuthenticated = () => {
   if (typeof window === 'undefined') return false;
@@ -104,8 +107,20 @@ export default function App() {
   const [ledger, setLedger] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [banners, setBanners] = useState([]);
-  const [promotions, setPromotions] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+  const [promotions, setPromotions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('homeease_admin_coupons');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem('homeease_admin_notifications');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
   const [securitySettings, setSecuritySettings] = useState(DEFAULT_SECURITY_SETTINGS);
   const [auditLogs, setAuditLogs] = useState([]);
 
@@ -319,14 +334,22 @@ export default function App() {
           isCollapsed={isCollapsed}
           setIsCollapsed={setIsCollapsed}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+          onQuickBookingSearch={(id) => {
+            setActiveModule('bookings');
+            handleOmniSearch(id);
+          }}
         />
 
         {/* Dynamic Screen View Module Switcher */}
         <main className="flex-1 p-3 sm:p-5 md:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6 min-w-0 overflow-x-hidden">
-          {activeModule === 'dashboard' && (
+          {(activeModule === 'dashboard' || activeModule === 'overview') && (
             <Module02Dashboard 
               rawStats={rawStats}
+              bookings={bookings}
+              workers={workers}
+              customers={customers}
               categories={categories}
+              subServices={subServices}
               ledger={ledger}
               auditLogs={auditLogs}
               onNavigateModule={setActiveModule}
@@ -355,6 +378,7 @@ export default function App() {
             <Module05Customers 
               customers={customers} 
               setCustomers={setCustomers}
+              bookings={bookings}
               onRefresh={syncAllLiveData}
             />
           )}
@@ -371,14 +395,33 @@ export default function App() {
               ledger={ledger}
               onRefresh={syncAllLiveData}
               isRefreshing={isSyncing}
+              onNavigateModule={setActiveModule}
+            />
+          )}
+
+          {activeModule === 'live-operations' && (
+            <Module06Dispatch 
+              liveMapData={liveMapData}
+              bookings={bookings}
+              workers={workers}
+              customers={customers}
+              categories={categories}
+              onRefresh={syncAllLiveData}
+              isRefreshing={isSyncing}
+              onNavigateModule={setActiveModule}
             />
           )}
 
           {(activeModule === 'dispatch' || activeModule === 'fleet') && (
-            <Module06Dispatch 
+            <Module06DispatchManagement 
               liveMapData={liveMapData}
+              bookings={bookings}
+              workers={workers}
+              customers={customers}
+              categories={categories}
               onRefresh={syncAllLiveData}
               isRefreshing={isSyncing}
+              onNavigateModule={setActiveModule}
             />
           )}
 
@@ -392,7 +435,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'service-areas' && <Module14ServiceAreas />}
+          {activeModule === 'service-areas' && (
+            <Module14ServiceAreas onRefresh={syncAllLiveData} />
+          )}
 
           {activeModule === 'sub-services' && (
             <Module08SubServices 
@@ -400,6 +445,7 @@ export default function App() {
               setSubServices={setSubServices}
               categories={categories}
               onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
             />
           )}
 
@@ -411,11 +457,47 @@ export default function App() {
             />
           )}
 
+          {(activeModule === 'schedule-slots' || activeModule === 'slots') && (
+            <Module15ScheduleSlots 
+              bookings={bookings}
+              workers={workers}
+              categories={categories}
+              onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
+            />
+          )}
+
           {(activeModule === 'payments' || activeModule === 'financials') && (
             <Module09Financials 
               ledger={ledger} 
               setLedger={setLedger}
+              bookings={bookings}
+              workers={workers}
+              categories={categories}
               onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
+            />
+          )}
+
+          {(activeModule === 'coupons' || activeModule === 'promotions') && (
+            <Module11Promotions 
+              promotions={promotions} 
+              setPromotions={setPromotions}
+              bookings={bookings}
+              categories={categories}
+              onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
+            />
+          )}
+
+          {(activeModule === 'support' || activeModule === 'complaints') && (
+            <Module17SupportComplaints 
+              bookings={bookings}
+              workers={workers}
+              customers={customers}
+              ledger={ledger}
+              onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
             />
           )}
 
@@ -429,6 +511,7 @@ export default function App() {
               rawStats={rawStats}
               onRefresh={syncAllLiveData}
               isRefreshing={isSyncing}
+              onNavigateModule={setActiveModule}
             />
           )}
 
@@ -441,19 +524,15 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'promotions' && (
-            <Module11Promotions 
-              promotions={promotions} 
-              setPromotions={setPromotions}
-              onRefresh={syncAllLiveData}
-            />
-          )}
-
           {activeModule === 'notifications' && (
             <Module12Notifications 
               notifications={notifications} 
               setNotifications={setNotifications}
+              customers={customers}
+              workers={workers}
+              categories={categories}
               onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
             />
           )}
 
@@ -461,6 +540,8 @@ export default function App() {
             <Module13Settings
               securitySettings={securitySettings}
               setSecuritySettings={setSecuritySettings}
+              onRefresh={syncAllLiveData}
+              onNavigateModule={setActiveModule}
             />
           )}
         </main>

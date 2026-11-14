@@ -2,11 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, Clock, UploadCloud, X, Check, 
   IndianRupee, Package, Layers, ChevronDown, ChevronLeft, ChevronRight, Loader2, ImageOff,
-  RotateCcw, AlertCircle
+  RotateCcw, AlertCircle, Smartphone
 } from 'lucide-react';
 import { createSubService, updateSubService, deleteSubService, uploadSubServiceImage } from '../api/adminApi';
 
-export const Module08SubServices = ({ subServices = [], setSubServices, categories = [], onRefresh }) => {
+export const Module08SubServices = ({ 
+  subServices = [], 
+  setSubServices, 
+  categories = [], 
+  onRefresh,
+  onNavigateModule 
+}) => {
   // Live API sub-services mapping
   const effectiveSubServices = (subServices && Array.isArray(subServices))
     ? subServices.map(s => ({
@@ -216,14 +222,21 @@ const UNIT_PRESETS = [
     }
   };
 
-  // Delete Row (soft deletes and immediately removes from active list)
-  const handleDeleteRow = async (item) => {
+  // Delete Row (soft deactivates or permanently purges)
+  const handleDeleteRow = async (item, hard = false) => {
     const id = item.subServiceId || item.id;
-    if (!window.confirm(`Are you sure you want to delete "${item.name}"? This sub-service will be deactivated and archived.`)) return;
+    const confirmMsg = hard
+      ? `Are you sure you want to PERMANENTLY delete "${item.name}"? This will purge it completely from the database.`
+      : `Are you sure you want to deactivate "${item.name}"? This sub-service will be moved to Inactive / Archived.`;
 
-    // Optimistically update local state so row immediately leaves the Active view
+    if (!window.confirm(confirmMsg)) return;
+
+    // Optimistically update local state so row immediately reflects the action
     setSubServices(prev => {
       const list = prev && prev.length > 0 ? prev : [];
+      if (hard) {
+        return list.filter(s => (s.subServiceId || s.id) !== id);
+      }
       return list.map(s => {
         const matchId = s.subServiceId || s.id;
         if (matchId === id) {
@@ -234,22 +247,13 @@ const UNIT_PRESETS = [
     });
 
     try {
-      await deleteSubService(id);
-      showFeedback('success', `"${item.name}" deleted successfully!`);
+      await deleteSubService(id, hard);
+      showFeedback('success', hard ? `"${item.name}" permanently deleted from database!` : `"${item.name}" deactivated and archived.`);
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('Backend delete error:', err.message);
       // Revert on error
-      setSubServices(prev => {
-        const list = prev && prev.length > 0 ? prev : [];
-        return list.map(s => {
-          const matchId = s.subServiceId || s.id;
-          if (matchId === id) {
-            return { ...s, isActive: true };
-          }
-          return s;
-        });
-      });
+      if (onRefresh) onRefresh();
       showFeedback('error', `Failed to delete: ${err.message}`);
     }
   };
@@ -415,6 +419,43 @@ const UNIT_PRESETS = [
           <p className="text-xs sm:text-sm text-slate-500 mt-1 font-medium">
             Manage sub-services, pricing and availability for all service categories.
           </p>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* CATALOG UNIFIED NAVIGATION HUB (Master, Sub-services, Explore Services)   */}
+        {/* ========================================================================= */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-2 shadow-2xs flex flex-wrap items-center gap-1.5 overflow-x-auto">
+          <button
+            onClick={() => onNavigateModule && onNavigateModule('categories')}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <Layers className="w-3.5 h-3.5 text-slate-400" />
+            <span>Master Categories</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+              {categories.length}
+            </span>
+          </button>
+
+          <button
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap bg-[#1D68F2] text-white shadow-xs"
+          >
+            <Package className="w-3.5 h-3.5 text-white" />
+            <span>Sub-Services & Packages</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white">
+              {totalCount}
+            </span>
+          </button>
+
+          <button
+            onClick={() => onNavigateModule && onNavigateModule('explore-services')}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+            <span>Explore Services (Mobile Home)</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+              Featured
+            </span>
+          </button>
         </div>
 
         {/* Top-Level Status Feedback Alert */}
@@ -692,7 +733,7 @@ const UNIT_PRESETS = [
 
                       {/* Actions (Edit Pencil + Delete Trash / Restore) */}
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => handleOpenEdit(item)}
                             className="p-1 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer"
@@ -702,21 +743,30 @@ const UNIT_PRESETS = [
                           </button>
                           {isActive ? (
                             <button
-                              onClick={() => handleDeleteRow(item)}
-                              className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                              title="Delete Sub-Service"
+                              onClick={() => handleDeleteRow(item, false)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition cursor-pointer"
+                              title="Deactivate / Archive Sub-Service"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           ) : (
-                            <button
-                              onClick={() => handleToggleRowActive(item)}
-                              className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-50 transition cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
-                              title="Restore Sub-Service"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">Restore</span>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleToggleRowActive(item)}
+                                className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-50 transition cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                                title="Restore Sub-Service"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Restore</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRow(item, true)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                                title="Permanently Delete from Database"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>

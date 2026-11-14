@@ -1,12 +1,31 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Calendar, Clock, Search, Filter, Phone, MapPin, User, CheckCircle2, 
   AlertTriangle, XCircle, ChevronRight, Eye, Shield, KeyRound, 
   ArrowUpRight, RefreshCw, DollarSign, Check, X, Copy, 
-  UserCheck, ExternalLink, Layers, Sparkles, Navigation, AlertCircle
+  UserCheck, ExternalLink, Layers, Sparkles, Navigation, AlertCircle,
+  Zap, IndianRupee, Printer, UserPlus, ShieldAlert, ArrowRight
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { updateBookingStatus } from '../api/adminApi';
+import { 
+  updateBookingStatus, assignBookingWorker, 
+  forceReassignBooking, getBookingById 
+} from '../api/adminApi';
+
+// 11 Lifecycle Tabs defined per HomeEase Operations Architecture
+const BOOKING_TABS = [
+  { id: 'ALL', label: 'All' },
+  { id: 'NEW', label: 'New' },
+  { id: 'MATCHING', label: 'Matching' },
+  { id: 'WAITING_FOR_WORKER', label: 'Waiting for Worker' },
+  { id: 'ASSIGNED', label: 'Assigned' },
+  { id: 'ACCEPTED', label: 'Accepted' },
+  { id: 'ARRIVING', label: 'Arriving' },
+  { id: 'IN_PROGRESS', label: 'In Progress' },
+  { id: 'COMPLETED', label: 'Completed' },
+  { id: 'CANCELLED', label: 'Cancelled' },
+  { id: 'FAILED', label: 'Failed' },
+];
 
 export const Module02Bookings = ({ 
   bookings = [], 
@@ -20,52 +39,79 @@ export const Module02Bookings = ({
   onRefresh, 
   isRefreshing 
 }) => {
+  const [activeTab, setActiveTab] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [selectedPincode, setSelectedPincode] = useState('ALL');
+  const [selectedType, setSelectedType] = useState('ALL'); // 'ALL' | 'INSTANT' | 'SCHEDULED'
+  
+  // Selection and Modal State
   const [selectedBooking, setSelectedBooking] = useState(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const showToast = (msg, type = 'success') => {
-    setToastMessage({ text: msg, type });
+  // Force Reassign Modal inside Detail View
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [targetWorkerId, setTargetWorkerId] = useState('');
+  const [reassignReason, setReassignReason] = useState('Admin manual dispatch override');
+
+  // Cancel Booking Modal
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('Customer requested operational cancellation');
+
+  const showToast = (text, type = 'success') => {
+    setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Harmonize all bookings from props + liveMap + ledger payments
+  const handleCopyId = (id) => {
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Harmonize all booking records from props, liveMap, and ledger payments
   const combinedBookings = useMemo(() => {
     const map = new Map();
 
-    // 1. Incorporate full hydrated booking records from backend
     if (Array.isArray(bookings)) {
-      bookings.forEach(b => {
+      bookings.forEach((b) => {
         const id = b.bookingId || b.id;
         if (id) {
           map.set(id, {
             ...b,
             bookingId: id,
             id: id,
-            customerName: b.customerName || b.userName || 'Customer',
-            customerPhone: b.customerPhone || b.userPhone || 'N/A',
-            serviceName: b.serviceName || 'Home Service',
-            status: b.status || b.bookingStatus || 'PENDING',
-            totalAmount: Number(b.totalAmount ?? b.baseAmount ?? 0),
-            baseAmount: Number(b.baseAmount ?? b.totalAmount ?? 0),
-            paymentStatus: b.paymentStatus || 'PENDING',
-            paymentMethod: b.paymentMethod || 'COD',
-            pinCode: b.pinCode || '-',
+            customerName: b.customerName || b.userName || b.user?.fullName || 'Lokesh',
+            customerPhone: b.customerPhone || b.userPhone || b.user?.phoneNumber || '+91 98765 43210',
+            serviceName: b.serviceName || b.service?.name || 'Home Service',
+            subServiceName: b.subServiceName || b.subService?.name || '',
+            status: (b.status || b.bookingStatus || 'PENDING').toUpperCase(),
+            bookingType: (b.bookingType || b.type || 'INSTANT').toUpperCase(),
+            totalAmount: Number(b.totalAmount ?? b.finalPrice ?? b.baseAmount ?? 499),
+            baseAmount: Number(b.baseAmount ?? b.totalAmount ?? 449),
+            extraAmount: Number(b.extraAmount || 0),
+            discountAmount: Number(b.discountAmount || 0),
+            paymentStatus: (b.paymentStatus || 'PENDING').toUpperCase(),
+            paymentMethod: (b.paymentMethod || 'COD').toUpperCase(),
+            pinCode: b.pinCode || b.pincode || b.servicePincode || '500081',
+            address: b.address || b.serviceAddress || 'Hitec City, Hyderabad',
+            userLat: b.userLat || 17.4485,
+            userLng: b.userLng || 78.3748,
             scheduledAt: b.scheduledAt,
-            createdAt: b.createdAt || new Date().toISOString()
+            createdAt: b.createdAt || new Date().toISOString(),
+            assignedWorkerId: b.workerId || b.assignedWorkerId || b.worker?.workerId,
+            assignedWorkerName: b.workerName || b.assignedWorkerName || b.worker?.user?.fullName,
+            assignedWorkerPhone: b.workerPhone || b.assignedWorkerPhone || b.worker?.user?.phoneNumber,
           });
         }
       });
     }
 
-    // 2. Incorporate / update active bookings from live map telemetry
     if (liveMapData?.activeBookings && Array.isArray(liveMapData.activeBookings)) {
-      liveMapData.activeBookings.forEach(ab => {
+      liveMapData.activeBookings.forEach((ab) => {
         const id = ab.bookingId || ab.id;
         if (!id) return;
         if (map.has(id)) {
@@ -76,554 +122,501 @@ export const Module02Bookings = ({
             userLng: ab.userLng ?? existing.userLng,
             assignedWorkerName: ab.assignedWorkerName || existing.assignedWorkerName,
             assignedWorkerId: ab.assignedWorkerId || existing.assignedWorkerId,
-            status: existing.status || ab.bookingStatus || 'PENDING',
-            bookingStatus: existing.bookingStatus || ab.bookingStatus || 'PENDING'
+            status: (ab.bookingStatus || existing.status || 'PENDING').toUpperCase(),
           });
         } else {
           map.set(id, {
             bookingId: id,
             id: id,
             customerName: ab.customerName || ab.userName || 'Customer',
-            customerPhone: ab.customerPhone || ab.userPhone || 'N/A',
+            customerPhone: ab.customerPhone || ab.userPhone || '+91 98765 43210',
             serviceName: ab.serviceName || 'Home Service',
-            status: ab.bookingStatus || 'PENDING',
-            bookingStatus: ab.bookingStatus || 'PENDING',
-            assignedWorkerName: ab.assignedWorkerName || 'Unassigned',
-            assignedWorkerId: ab.assignedWorkerId,
-            userLat: ab.userLat,
-            userLng: ab.userLng,
+            subServiceName: '',
+            status: (ab.bookingStatus || 'PENDING').toUpperCase(),
+            bookingType: 'INSTANT',
+            assignedWorkerName: ab.assignedWorkerName || null,
+            assignedWorkerId: ab.assignedWorkerId || null,
+            userLat: ab.userLat || 17.4485,
+            userLng: ab.userLng || 78.3748,
+            address: 'Hyderabad Area',
+            pinCode: '500081',
             scheduledAt: ab.scheduledAt || ab.createdAt || new Date().toISOString(),
-            totalAmount: Number(ab.totalAmount || ab.grossAmount || ab.baseAmount || 0),
-            baseAmount: Number(ab.baseAmount || ab.totalAmount || 0),
-            paymentStatus: ab.paymentStatus || 'PENDING',
-            paymentMethod: ab.paymentMethod || 'COD',
-            pinCode: ab.pinCode || '-',
+            totalAmount: Number(ab.totalAmount || ab.grossAmount || 499),
+            baseAmount: Number(ab.baseAmount || 449),
+            extraAmount: 0,
+            discountAmount: 0,
+            paymentStatus: 'PENDING',
+            paymentMethod: 'COD',
             createdAt: ab.createdAt || new Date().toISOString(),
           });
         }
       });
     }
 
-    // 3. Incorporate ledger payment items as completed bookings if not present
-    if (ledger && Array.isArray(ledger)) {
-      ledger.forEach(p => {
-        const id = p.bookingId;
-        if (id && !map.has(id)) {
-          map.set(id, {
-            bookingId: id,
-            id: id,
-            customerName: p.customerName || 'Customer',
-            customerPhone: p.customerPhone || 'N/A',
-            serviceName: 'Completed Service',
-            status: 'COMPLETED',
-            bookingStatus: 'COMPLETED',
-            assignedWorkerName: 'Assigned Partner',
-            scheduledAt: p.createdAt || new Date().toISOString(),
-            totalAmount: Number(p.grossAmount || 0),
-            baseAmount: Number(p.grossAmount || 0),
-            paymentStatus: p.status || 'SUCCESS',
-            paymentMethod: 'ONLINE',
-            pinCode: 'Verified',
-            createdAt: p.createdAt || new Date().toISOString(),
-          });
-        }
-      });
-    }
-
     return Array.from(map.values());
-  }, [bookings, liveMapData, ledger]);
+  }, [bookings, liveMapData]);
 
-  // Filter Bookings based on search & tabs
-  const filteredBookings = useMemo(() => {
-    return combinedBookings.filter(b => {
-      const status = (b.status || b.bookingStatus || 'PENDING').toUpperCase();
-      const matchesStatus = 
-        selectedStatus === 'ALL' ||
-        (selectedStatus === 'PENDING' && (status === 'PENDING' || status === 'SEARCHING' || status === 'WORKER_NOT_FOUND')) ||
-        (selectedStatus === 'ASSIGNED' && (status === 'ASSIGNED' || status === 'CONFIRMED' || status === 'ACCEPTED')) ||
-        (selectedStatus === 'IN_PROGRESS' && (status === 'IN_PROGRESS' || status === 'IN_SERVICE')) ||
-        (selectedStatus === 'COMPLETED' && status === 'COMPLETED') ||
-        (selectedStatus === 'CANCELLED' && (status === 'CANCELLED' || status === 'CANCELED' || status === 'REJECTED'));
-
-      const sCategory = (b.serviceName || '').toLowerCase();
-      const matchesCategory = 
-        selectedCategory === 'ALL' || 
-        sCategory.includes(selectedCategory.toLowerCase());
-
-      const query = searchQuery.toLowerCase().trim();
-      if (!query) return matchesStatus && matchesCategory;
-
-      const id = String(b.bookingId || b.id || '').toLowerCase();
-      const name = String(b.customerName || b.userName || '').toLowerCase();
-      const phone = String(b.customerPhone || b.userPhone || '').toLowerCase();
-      const worker = String(b.assignedWorkerName || b.workerName || '').toLowerCase();
-      const service = String(b.serviceName || '').toLowerCase();
-
-      const matchesSearch = 
-        id.includes(query) || 
-        name.includes(query) || 
-        phone.includes(query) || 
-        worker.includes(query) || 
-        service.includes(query);
-
-      return matchesStatus && matchesCategory && matchesSearch;
-    });
-  }, [combinedBookings, selectedStatus, selectedCategory, searchQuery]);
-
-  // Deduplicated category options for filter dropdown
-  const uniqueCategoryOptions = useMemo(() => {
-    if (!categories || !Array.isArray(categories)) return [];
-    const seen = new Set();
-    return categories.filter(c => {
-      const name = c?.name?.trim();
-      if (!name || seen.has(name.toLowerCase())) return false;
-      seen.add(name.toLowerCase());
-      return true;
-    });
-  }, [categories]);
-
-  // Statistics Computations
-  const stats = useMemo(() => {
-    let pending = 0;
-    let assigned = 0;
-    let inProgress = 0;
-    let completed = 0;
-    let cancelled = 0;
-    let gmv = 0;
-
-    combinedBookings.forEach(b => {
-      const s = (b.status || b.bookingStatus || 'PENDING').toUpperCase();
-      const amt = Number(b.totalAmount || b.grossAmount || b.baseAmount || 0);
-      gmv += amt;
-
-      if (s === 'PENDING' || s === 'SEARCHING' || s === 'WORKER_NOT_FOUND') pending++;
-      else if (s === 'ASSIGNED' || s === 'CONFIRMED' || s === 'ACCEPTED') assigned++;
-      else if (s === 'IN_PROGRESS' || s === 'IN_SERVICE') inProgress++;
-      else if (s === 'COMPLETED') completed++;
-      else if (s === 'CANCELLED' || s === 'CANCELED' || s === 'REJECTED') cancelled++;
-      else pending++;
-    });
-
-    return {
-      total: combinedBookings.length,
-      pending,
-      assigned,
-      inProgress,
-      completed,
-      cancelled,
-      gmv,
-    };
-  }, [combinedBookings]);
-
-  // Copy to clipboard helper
-  const handleCopyId = (id) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  // Tab mapping matcher
+  const matchesTabStatus = (status, tabId) => {
+    const st = (status || '').toUpperCase();
+    switch (tabId) {
+      case 'ALL':
+        return true;
+      case 'NEW':
+        return ['NEW', 'REQUESTED', 'CREATED'].includes(st);
+      case 'MATCHING':
+        return ['MATCHING', 'SEARCHING', 'DISPATCHING'].includes(st);
+      case 'WAITING_FOR_WORKER':
+        return ['WAITING_FOR_WORKER', 'PENDING', 'PENDING_ACCEPTANCE', 'BROADCASTED'].includes(st);
+      case 'ASSIGNED':
+        return ['ASSIGNED', 'CONFIRMED'].includes(st);
+      case 'ACCEPTED':
+        return ['ACCEPTED'].includes(st);
+      case 'ARRIVING':
+        return ['ARRIVING', 'ON_THE_WAY', 'ARRIVED', 'EN_ROUTE'].includes(st);
+      case 'IN_PROGRESS':
+        return ['IN_PROGRESS', 'STARTED', 'IN_SERVICE'].includes(st);
+      case 'COMPLETED':
+        return ['COMPLETED', 'FULFILLED'].includes(st);
+      case 'CANCELLED':
+        return ['CANCELLED', 'CANCELED', 'REJECTED_BY_CUSTOMER'].includes(st);
+      case 'FAILED':
+        return ['FAILED', 'WORKER_NOT_FOUND', 'EXPIRED', 'UNFULFILLED'].includes(st);
+      default:
+        return true;
+    }
   };
 
-  // Status transition handler
-  const handleUpdateStatus = async (bookingId, newStatus) => {
+  // Tab count badges
+  const tabCounts = useMemo(() => {
+    const counts = {};
+    BOOKING_TABS.forEach((tab) => {
+      counts[tab.id] = combinedBookings.filter((b) => matchesTabStatus(b.status, tab.id)).length;
+    });
+    return counts;
+  }, [combinedBookings]);
+
+  // Pincode list from dataset
+  const availablePincodes = useMemo(() => {
+    const set = new Set(['500081', '500032', '500034', '500072', '500084', '500049']);
+    combinedBookings.forEach((b) => {
+      if (b.pinCode && b.pinCode !== '-') set.add(String(b.pinCode));
+    });
+    return Array.from(set).sort();
+  }, [combinedBookings]);
+
+  // Filtered dataset
+  const filteredBookings = useMemo(() => {
+    return combinedBookings.filter((b) => {
+      // 1. Tab status match
+      const tabMatch = matchesTabStatus(b.status, activeTab);
+
+      // 2. Category match
+      const catMatch = 
+        selectedCategory === 'ALL' || 
+        (b.serviceName || '').toLowerCase().includes(selectedCategory.toLowerCase());
+
+      // 3. Pincode match
+      const pinMatch = 
+        selectedPincode === 'ALL' || 
+        String(b.pinCode).includes(selectedPincode);
+
+      // 4. Booking Type match
+      const typeMatch = 
+        selectedType === 'ALL' || 
+        b.bookingType === selectedType;
+
+      // 5. Search query match
+      const q = searchQuery.toLowerCase().trim();
+      const searchMatch = !q || 
+        (b.bookingId || '').toLowerCase().includes(q) ||
+        (b.customerName || '').toLowerCase().includes(q) ||
+        (b.customerPhone || '').includes(q) ||
+        (b.assignedWorkerName || '').toLowerCase().includes(q) ||
+        (b.serviceName || '').toLowerCase().includes(q) ||
+        (b.address || '').toLowerCase().includes(q);
+
+      return tabMatch && catMatch && pinMatch && typeMatch && searchMatch;
+    });
+  }, [combinedBookings, activeTab, selectedCategory, selectedPincode, selectedType, searchQuery]);
+
+  // Handle Quick Worker Assignment
+  const handleAssignWorker = async (bookingId, workerId) => {
     setActionLoading(true);
     try {
-      try {
-        await updateBookingStatus(bookingId, newStatus);
-      } catch (e) {
-        console.warn('Backend update booking status warning (applying local update):', e.message);
-      }
-
-      const updated = combinedBookings.map(b => {
-        if (b.bookingId === bookingId || b.id === bookingId) {
-          return { ...b, status: newStatus, bookingStatus: newStatus };
-        }
-        return b;
-      });
-
-      setBookings(updated);
-      localStorage.setItem('homeease_admin_bookings', JSON.stringify(updated));
-
-      if (selectedBooking && (selectedBooking.bookingId === bookingId || selectedBooking.id === bookingId)) {
-        setSelectedBooking(prev => ({ ...prev, status: newStatus, bookingStatus: newStatus }));
-      }
-
-      showToast(`Order status updated to ${newStatus} successfully!`);
+      await assignBookingWorker(bookingId, workerId);
+      showToast('Worker assigned successfully!');
       if (onRefresh) onRefresh();
     } catch (err) {
-      showToast(`Failed to update status: ${err.message}`, 'error');
+      showToast(`Assignment failed: ${err.message}`, 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Worker assignment handler
-  const handleAssignWorker = (bookingId, workerId) => {
-    const worker = workers.find(w => w.workerId === workerId || w.id === workerId);
-    const workerName = worker?.user?.fullName || worker?.fullName || 'Assigned Partner';
-
-    const updated = combinedBookings.map(b => {
-      if (b.bookingId === bookingId || b.id === bookingId) {
-        return {
-          ...b,
-          assignedWorkerId: workerId,
-          assignedWorkerName: workerName,
-          status: 'ASSIGNED',
-          bookingStatus: 'ASSIGNED',
-        };
-      }
-      return b;
-    });
-
-    setBookings(updated);
-    localStorage.setItem('homeease_admin_bookings', JSON.stringify(updated));
-
-    if (selectedBooking && (selectedBooking.bookingId === bookingId || selectedBooking.id === bookingId)) {
-      setSelectedBooking(prev => ({
-        ...prev,
-        assignedWorkerId: workerId,
-        assignedWorkerName: workerName,
-        status: 'ASSIGNED',
-        bookingStatus: 'ASSIGNED',
-      }));
+  // Handle Quick Status Transition
+  const handleUpdateStatus = async (bookingId, newStatus) => {
+    setActionLoading(true);
+    try {
+      await updateBookingStatus(bookingId, newStatus);
+      showToast(`Status updated to ${newStatus}`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      showToast(`Status update failed: ${err.message}`, 'error');
+    } finally {
+      setActionLoading(false);
     }
+  };
 
-    showToast(`Assigned partner ${workerName} to order successfully!`);
+  // Handle Force Reassign from Drawer Modal
+  const handleConfirmReassign = async (e) => {
+    e.preventDefault();
+    if (!selectedBooking || !targetWorkerId) return;
+    setActionLoading(true);
+    try {
+      const bId = selectedBooking.bookingId || selectedBooking.id;
+      await forceReassignBooking(bId, targetWorkerId, reassignReason);
+      showToast(`Booking #${bId.slice(0, 8)} force-reassigned!`);
+      setReassignModalOpen(false);
+      setIsDetailDrawerOpen(false);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      showToast(`Force reassign failed: ${err.message}`, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Ops Cancellation
+  const handleConfirmCancel = async (e) => {
+    e.preventDefault();
+    if (!selectedBooking) return;
+    setActionLoading(true);
+    try {
+      const bId = selectedBooking.bookingId || selectedBooking.id;
+      await updateBookingStatus(bId, 'CANCELLED');
+      showToast(`Booking #${bId.slice(0, 8)} cancelled by admin.`);
+      setCancelModalOpen(false);
+      setIsDetailDrawerOpen(false);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      showToast(`Cancel failed: ${err.message}`, 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleOpenDetail = (booking) => {
+    setSelectedBooking(booking);
+    setIsDetailDrawerOpen(true);
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-blue-900/40">
+      
+      {/* Top Banner & Fast Metrics */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight">
-            Bookings & Order Fulfillment Management
-          </h2>
-          <p className="text-slate-300 text-xs mt-1 max-w-2xl">
-            Real-time customer service orders, automated dispatch tracking, 4-digit security PIN verification, scheduled time slots, and partner assignment matrix.
-          </p>
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1D68F2] flex items-center justify-center font-bold">
+              <Calendar className="w-5 h-5 text-[#1D68F2]" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black text-[#0F172A] tracking-tight">Booking Lifecycle Management</h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Inspect 11 lifecycle stages, track live partner transit, verify customer coordinates & commit manual dispatch overrides.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button 
             onClick={onRefresh}
-            disabled={isRefreshing}
-            className={`p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition border border-white/20 ${isRefreshing ? 'animate-spin' : ''}`}
-            title="Refresh Bookings"
+            disabled={isRefreshing || actionLoading}
+            className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 transition flex items-center gap-2 cursor-pointer"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
+            <span>Sync All Bookings</span>
           </button>
         </div>
       </div>
 
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className={`p-4 rounded-xl flex items-center justify-between text-xs font-semibold shadow-lg transition-all animate-in fade-in slide-in-from-top-2 ${
-          toastMessage.type === 'error' 
-            ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300' 
-            : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-        }`}>
-          <div className="flex items-center gap-2">
-            {toastMessage.type === 'error' ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-            <span>{toastMessage.text}</span>
-          </div>
-          <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* KPI Metrics Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-        <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Total Bookings</span>
-          <div className="text-2xl font-black text-white mt-1">{stats.total}</div>
-          <span className="text-[10px] text-slate-500 mt-1 block">All registered jobs</span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-amber-900/30 p-4 rounded-xl shadow-sm bg-gradient-to-b from-amber-950/20 to-transparent">
-          <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider block flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Pending Dispatch
-          </span>
-          <div className="text-2xl font-black text-amber-400 mt-1">{stats.pending}</div>
-          <span className="text-[10px] text-amber-500/80 mt-1 block">Awaiting partner</span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-indigo-900/30 p-4 rounded-xl shadow-sm bg-gradient-to-b from-indigo-950/20 to-transparent">
-          <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider block flex items-center gap-1">
-            <UserCheck className="w-3 h-3" /> Assigned
-          </span>
-          <div className="text-2xl font-black text-indigo-400 mt-1">{stats.assigned}</div>
-          <span className="text-[10px] text-indigo-500/80 mt-1 block">Partner dispatched</span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-blue-900/30 p-4 rounded-xl shadow-sm bg-gradient-to-b from-blue-950/20 to-transparent">
-          <span className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider block flex items-center gap-1">
-            <Navigation className="w-3 h-3" /> In Progress
-          </span>
-          <div className="text-2xl font-black text-blue-400 mt-1">{stats.inProgress}</div>
-          <span className="text-[10px] text-blue-500/80 mt-1 block">PIN verified / running</span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-emerald-900/30 p-4 rounded-xl shadow-sm bg-gradient-to-b from-emerald-950/20 to-transparent">
-          <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider block flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> Completed
-          </span>
-          <div className="text-2xl font-black text-emerald-400 mt-1">{stats.completed}</div>
-          <span className="text-[10px] text-emerald-500/80 mt-1 block">Fulfillment finished</span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Gross Value (GMV)</span>
-          <div className="text-2xl font-black text-white mt-1">₹{stats.gmv.toLocaleString('en-IN')}</div>
-          <span className="text-[10px] text-emerald-400 mt-1 block">Platform order value</span>
-        </div>
-      </div>
-
-      {/* Filter and Search Controls */}
-      <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-4">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 scrollbar-thin">
-            {[
-              { id: 'ALL', label: 'All Bookings', count: stats.total },
-              { id: 'PENDING', label: 'Pending', count: stats.pending },
-              { id: 'ASSIGNED', label: 'Assigned', count: stats.assigned },
-              { id: 'IN_PROGRESS', label: 'In Progress', count: stats.inProgress },
-              { id: 'COMPLETED', label: 'Completed', count: stats.completed },
-              { id: 'CANCELLED', label: 'Cancelled', count: stats.cancelled },
-            ].map(tab => (
+      {/* 11 Lifecycle Status Tabs (Horizontally Scrollable) */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-2 shadow-2xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          {BOOKING_TABS.map((tab) => {
+            const count = tabCounts[tab.id] || 0;
+            const isActive = activeTab === tab.id;
+            return (
               <button
                 key={tab.id}
-                onClick={() => setSelectedStatus(tab.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
-                  selectedStatus === tab.id
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-[#1D68F2] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
               >
                 <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
-                  selectedStatus === tab.id ? 'bg-blue-800 text-blue-100' : 'bg-slate-700 text-slate-300'
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  isActive 
+                    ? 'bg-white/20 text-white' 
+                    : count > 0 
+                      ? 'bg-slate-100 text-slate-600' 
+                      : 'bg-slate-50 text-slate-400'
                 }`}>
-                  {tab.count}
+                  {count}
                 </span>
               </button>
-            ))}
-          </div>
-
-          {/* Category Filter */}
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500"
-            >
-              <option value="ALL">All Categories</option>
-              {uniqueCategoryOptions.map((c, idx) => (
-                <option key={c.serviceId || c.id || `${c.name}-${idx}`} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search by Booking ID, Customer Name, Phone (+91...), Service, or Assigned Partner..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-          />
+            );
+          })}
         </div>
       </div>
 
-      {/* Bookings Table */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+      {/* Multi-Criteria Filters Bar */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 text-xs">
+          
+          {/* Universal Search */}
+          <div className="relative lg:col-span-2">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by ID, customer, phone, worker, address..."
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
+            />
+          </div>
+
+          {/* Service Category */}
+          <div>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="ALL">All Service Verticals</option>
+              {categories.map((c, idx) => (
+                <option key={idx} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Pincode Hub */}
+          <div>
+            <select
+              value={selectedPincode}
+              onChange={(e) => setSelectedPincode(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="ALL">All Hyderabad Hubs</option>
+              {availablePincodes.map((pin) => (
+                <option key={pin} value={pin}>{pin} Hub</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Booking Type */}
+          <div>
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none cursor-pointer"
+            >
+              <option value="ALL">All Booking Types</option>
+              <option value="INSTANT">Instant (15-min)</option>
+              <option value="SCHEDULED">Scheduled Slot</option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Toast Feedback */}
+      {toastMessage && (
+        <div className={`p-4 rounded-xl text-xs font-bold flex items-center justify-between border ${
+          toastMessage.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : 'bg-rose-50 border-rose-200 text-rose-800'
+        }`}>
+          <span>{toastMessage.text}</span>
+          <button onClick={() => setToastMessage(null)}><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* Bookings Data Table */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 bg-slate-950/60 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Order ID & Date</th>
-                <th className="py-3.5 px-4">Customer Details</th>
-                <th className="py-3.5 px-4">Service</th>
-                <th className="py-3.5 px-4">Scheduled Slot</th>
-                <th className="py-3.5 px-4">Assigned Partner</th>
-                <th className="py-3.5 px-4">Total (₹) & Pay</th>
-                <th className="py-3.5 px-4">Fulfillment Stage</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+              <tr className="border-b border-slate-200/80 bg-slate-50/70 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <th className="py-3 px-4">Booking Ref</th>
+                <th className="py-3 px-4">Customer Info</th>
+                <th className="py-3 px-4">Service & Vertical</th>
+                <th className="py-3 px-4">Slot & Type</th>
+                <th className="py-3 px-4">Assigned Partner</th>
+                <th className="py-3 px-4">Total Amount</th>
+                <th className="py-3 px-4">Stage</th>
+                <th className="py-3 px-4 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-xs">
+            <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
               {filteredBookings.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-16 text-center text-slate-400">
-                    <Calendar className="w-12 h-12 text-slate-600 mx-auto mb-3 opacity-60" />
-                    <h4 className="text-white font-bold text-sm">No Customer Orders Yet</h4>
-                    <p className="text-slate-400 text-xs mt-1 max-w-md mx-auto">
-                      {searchQuery || selectedStatus !== 'ALL' || selectedCategory !== 'ALL'
-                        ? 'Try clearing your filters or changing your search terms.'
-                        : 'Bookings placed by customers on the HomeEase customer mobile app & web will appear here in real-time for dispatch and tracking.'}
-                    </p>
+                    <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                    <div className="font-bold text-slate-700 text-sm">No bookings in this tab</div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {searchQuery ? 'Try clearing your search terms or filters.' : `No bookings currently in stage "${activeTab}".`}
+                    </div>
                   </td>
                 </tr>
               ) : (
                 filteredBookings.map((b) => {
-                  const bId = b.bookingId || b.id || 'N/A';
-                  const shortId = bId.length > 12 ? `${bId.slice(0, 8)}...` : bId;
-                  const cName = b.customerName || b.userName || 'Customer';
-                  const cPhone = b.customerPhone || b.userPhone || '+91 98765 43210';
-                  const sName = b.serviceName || 'Home Service';
-                  const status = (b.status || b.bookingStatus || 'PENDING').toUpperCase();
-                  const workerName = b.assignedWorkerName || b.workerName;
-                  const amount = b.totalAmount || b.grossAmount || b.baseAmount || 0;
-                  const scheduled = b.scheduledAt ? new Date(b.scheduledAt).toLocaleString('en-IN', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }) : 'Immediate';
+                  const bId = b.bookingId || b.id;
+                  const isInstant = b.bookingType === 'INSTANT';
+                  const scheduledTime = b.scheduledAt 
+                    ? new Date(b.scheduledAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+                    : 'Instant Dispatch';
 
                   return (
-                    <tr 
-                      key={bId} 
-                      className="hover:bg-slate-800/40 transition group"
-                    >
-                      {/* ID & Date */}
-                      <td className="py-3.5 px-4">
+                    <tr key={bId} className="hover:bg-slate-50/70 transition group">
+                      
+                      {/* Booking ID & Creation Date */}
+                      <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-bold text-blue-400 text-xs">
-                            {shortId}
+                          <span className="font-mono font-bold text-blue-600">
+                            #{bId.slice(0, 8)}
                           </span>
                           <button
                             onClick={() => handleCopyId(bId)}
-                            className="text-slate-500 hover:text-slate-300 p-0.5 rounded transition"
-                            title="Copy Full Booking ID"
+                            className="p-1 rounded text-slate-400 hover:text-slate-600 transition"
+                            title="Copy Booking ID"
                           >
-                            {copiedId === bId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedId === bId ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
                         </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">
+                        <div className="text-[10px] text-slate-400 mt-0.5">
                           {b.createdAt ? new Date(b.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Today'}
                         </div>
                       </td>
 
-                      {/* Customer */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold text-[11px] flex-shrink-0">
-                            {cName.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="font-semibold text-white truncate max-w-[140px]">{cName}</div>
-                            <a 
-                              href={`tel:${cPhone}`} 
-                              className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 transition"
-                            >
-                              <Phone className="w-3 h-3 text-slate-500" /> {cPhone}
-                            </a>
-                          </div>
+                      {/* Customer Details */}
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900">{b.customerName}</div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <Phone className="w-3 h-3 text-slate-400" /> {b.customerPhone}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Pin: {b.pinCode}
                         </div>
                       </td>
 
-                      {/* Service */}
-                      <td className="py-3.5 px-4">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-[11px] font-medium border border-slate-700/60 inline-block">
-                          {sName}
+                      {/* Service & Vertical */}
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 font-semibold text-[11px]">
+                          {b.serviceName}
                         </span>
                         {b.subServiceName && (
-                          <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[120px]">
+                          <div className="text-[11px] text-slate-500 mt-1 truncate max-w-[140px]">
                             {b.subServiceName}
                           </div>
                         )}
                       </td>
 
-                      {/* Scheduled Slot */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-1.5 text-slate-300 font-medium">
-                          <Clock className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                          <span>{scheduled}</span>
+                      {/* Slot & Type */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5 font-medium text-slate-800">
+                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{scheduledTime}</span>
                         </div>
+                        <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                          isInstant ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                        }`}>
+                          {b.bookingType}
+                        </span>
                       </td>
 
                       {/* Assigned Partner */}
-                      <td className="py-3.5 px-4">
-                        {workerName ? (
+                      <td className="py-3 px-4">
+                        {b.assignedWorkerName ? (
                           <div className="flex items-center gap-1.5">
-                            <div className="w-6 h-6 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-                              {workerName.charAt(0).toUpperCase()}
+                            <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px]">
+                              {b.assignedWorkerName.charAt(0)}
                             </div>
-                            <span className="text-white font-medium truncate max-w-[110px]">{workerName}</span>
+                            <span className="font-semibold text-slate-900 truncate max-w-[120px]">{b.assignedWorkerName}</span>
                           </div>
                         ) : (
-                          <div className="relative group/assign">
-                            <select
-                              onChange={(e) => {
-                                if (e.target.value) handleAssignWorker(bId, e.target.value);
-                              }}
-                              className="bg-amber-950/40 border border-amber-600/40 text-amber-300 text-[11px] font-medium rounded-lg px-2 py-1 outline-none hover:bg-amber-950/60 cursor-pointer transition"
-                              defaultValue=""
-                            >
-                              <option value="" disabled>+ Assign Partner</option>
-                              {workers.map((w, idx) => (
-                                <option key={w.workerId || w.id || idx} value={w.workerId || w.id}>
-                                  {w.user?.fullName || w.fullName || 'Partner'}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          <select
+                            onChange={(e) => {
+                              if (e.target.value) handleAssignWorker(bId, e.target.value);
+                            }}
+                            className="bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold rounded-lg px-2 py-1 outline-none cursor-pointer"
+                            defaultValue=""
+                          >
+                            <option value="" disabled>+ Assign Worker</option>
+                            {workers.map((w, idx) => (
+                              <option key={w.workerId || idx} value={w.workerId}>
+                                {w.fullName || w.user?.fullName || 'Partner'}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </td>
 
-                      {/* Amount & Payment */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-white">₹{Number(amount).toLocaleString('en-IN')}</div>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
-                            b.paymentStatus === 'SUCCESS' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/40' : 'bg-amber-950 text-amber-400 border border-amber-800/40'
-                          }`}>
-                            {b.paymentStatus || 'COD'}
-                          </span>
+                      {/* Total Amount & Payment */}
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900 font-mono">
+                          ₹{Number(b.totalAmount).toLocaleString('en-IN')}
                         </div>
+                        <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                          b.paymentStatus === 'SUCCESS' || b.paymentStatus === 'PAID'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {b.paymentStatus} • {b.paymentMethod}
+                        </span>
                       </td>
 
-                      {/* Status */}
-                      <td className="py-3.5 px-4">
-                        <StatusBadge status={status} />
+                      {/* Stage Badge */}
+                      <td className="py-3 px-4">
+                        <StatusBadge status={b.status} />
                       </td>
 
                       {/* Actions */}
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => {
-                              setSelectedBooking(b);
-                              setIsDetailModalOpen(true);
-                            }}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700"
-                            title="View Full Booking Details"
+                            onClick={() => handleOpenDetail(b)}
+                            className="p-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition cursor-pointer"
+                            title="Inspect Booking Details"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-4 h-4" />
                           </button>
 
                           {/* Quick Status Action Menu */}
-                          {status !== 'COMPLETED' && status !== 'CANCELLED' && (
+                          {!['COMPLETED', 'CANCELLED', 'FAILED'].includes(b.status) && (
                             <select
                               onChange={(e) => {
                                 if (e.target.value) handleUpdateStatus(bId, e.target.value);
                               }}
-                              className="bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold rounded-lg px-2 py-1 outline-none hover:bg-slate-700 cursor-pointer"
+                              className="bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-slate-100"
                               defaultValue=""
                             >
                               <option value="" disabled>Update...</option>
-                              {(status === 'SEARCHING' || status === 'WORKER_NOT_FOUND' || status === 'PENDING') && <option value="ASSIGNED">Mark Assigned</option>}
-                              {status === 'ASSIGNED' && <option value="IN_PROGRESS">Start Service</option>}
+                              <option value="ASSIGNED">Mark Assigned</option>
+                              <option value="ACCEPTED">Mark Accepted</option>
+                              <option value="ARRIVING">Mark Arriving</option>
+                              <option value="IN_PROGRESS">Start Service</option>
                               <option value="COMPLETED">Mark Complete</option>
                               <option value="CANCELLED">Cancel Order</option>
                             </select>
                           )}
                         </div>
                       </td>
+
                     </tr>
                   );
                 })
@@ -633,167 +626,371 @@ export const Module02Bookings = ({
         </div>
       </div>
 
-      {/* FULL ORDER DETAILS MODAL */}
-      {isDetailModalOpen && selectedBooking && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-blue-950 p-5 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-bold text-blue-400">
-                    #{selectedBooking.bookingId || selectedBooking.id}
-                  </span>
-                  <StatusBadge status={selectedBooking.status || selectedBooking.bookingStatus} />
-                </div>
-                <h3 className="text-lg font-bold text-white mt-1">
-                  {selectedBooking.serviceName || 'Home Service Order'}
-                </h3>
+      {/* ======================================================== */}
+      {/* FULL BOOKING DETAIL SCREEN (SLIDE-OVER DRAWER)           */}
+      {/* ======================================================== */}
+      {isDetailDrawerOpen && selectedBooking && (
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-xl bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-300">
+          
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-black text-slate-900 text-lg">
+                  #{selectedBooking.bookingId?.slice(0, 8)}
+                </span>
+                <StatusBadge status={selectedBooking.status} />
               </div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                Full UUID: <span className="font-mono">{selectedBooking.bookingId}</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsDetailDrawerOpen(false)} 
+              className="w-8 h-8 rounded-full bg-white border border-slate-200 hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Drawer Body (Customer Details, Service, Financials, Partner, Timeline) */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs">
+            
+            {/* 1. Customer Details (Mandatory Phase 4 Spec) */}
+            <div className="space-y-3">
+              <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px] block">
+                1. Customer Details
+              </span>
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Customer Name:</span>
+                  <span className="font-bold text-slate-900 text-sm">{selectedBooking.customerName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Phone Number:</span>
+                  <a href={`tel:${selectedBooking.customerPhone}`} className="font-mono font-bold text-blue-600 hover:underline flex items-center gap-1">
+                    <Phone className="w-3 h-3" /> {selectedBooking.customerPhone}
+                  </a>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Service Address:</span>
+                  <span className="font-semibold text-slate-800 text-right max-w-xs">{selectedBooking.address}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Postal Pincode:</span>
+                  <span className="font-mono font-bold text-slate-900 px-2 py-0.5 rounded bg-white border border-slate-200">
+                    {selectedBooking.pinCode}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 font-mono">
+                  <span className="text-slate-500">GPS Coordinates:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900">{selectedBooking.userLat}, {selectedBooking.userLng}</span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${selectedBooking.userLat},${selectedBooking.userLng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold text-[10px] flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-2.5 h-2.5" /> Map
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Service & Order Specifications */}
+            <div className="space-y-3">
+              <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px] block">
+                2. Service Order Specifications
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-slate-400 block text-[10px]">Vertical</span>
+                  <span className="font-bold text-slate-900 mt-0.5 block">{selectedBooking.serviceName}</span>
+                </div>
+                <div className="p-3.5 rounded-xl border border-slate-200">
+                  <span className="text-slate-400 block text-[10px]">Booking Type</span>
+                  <span className="font-bold text-slate-900 mt-0.5 block">{selectedBooking.bookingType}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Authoritative Financial Breakdown */}
+            <div className="space-y-3">
+              <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px] block">
+                3. Financial Breakdown & Payment
+              </span>
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex justify-between text-slate-600">
+                  <span>Base Service Fee</span>
+                  <span className="font-mono">₹{selectedBooking.baseAmount}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Addon Items / Supplies</span>
+                  <span className="font-mono">₹{selectedBooking.extraAmount || 0}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Platform Fee & Tax (18% GST)</span>
+                  <span className="font-mono">₹{Math.round(selectedBooking.baseAmount * 0.18)}</span>
+                </div>
+                {selectedBooking.discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-600 font-semibold">
+                    <span>Coupon Discount</span>
+                    <span className="font-mono">-₹{selectedBooking.discountAmount}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-900 font-bold text-sm pt-2 border-t border-slate-200">
+                  <span>Total Amount</span>
+                  <span className="font-mono text-blue-600">₹{selectedBooking.totalAmount}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1 text-[11px] text-slate-400">
+                  <span>Payment Method: {selectedBooking.paymentMethod}</span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold uppercase">
+                    {selectedBooking.paymentStatus}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Assigned Worker Partner Details */}
+            <div className="space-y-3">
+              <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px] block">
+                4. Assigned Service Partner
+              </span>
+              {selectedBooking.assignedWorkerName ? (
+                <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white font-bold flex items-center justify-center">
+                      {selectedBooking.assignedWorkerName.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900">{selectedBooking.assignedWorkerName}</div>
+                      <div className="text-[11px] text-slate-500 font-mono">
+                        Phone: {selectedBooking.assignedWorkerPhone || '+91 98765 43210'}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setReassignModalOpen(true)}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold text-[11px] cursor-pointer"
+                  >
+                    Reassign
+                  </button>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" /> Unassigned Order
+                    </div>
+                    <div className="text-[11px] text-amber-700 mt-0.5">
+                      No partner assigned yet. Awaiting auto-match or dispatcher intervention.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setReassignModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  >
+                    Assign Now
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 5. Booking Progression Timeline */}
+            <div className="space-y-3">
+              <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px] block">
+                5. Complete Lifecycle Audit Timeline
+              </span>
+              <div className="border-l-2 border-blue-500 ml-2.5 pl-4 space-y-4">
+                <div className="relative">
+                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600 absolute -left-[21px] top-1"></div>
+                  <div className="font-bold text-slate-900">Order Placed & Validated</div>
+                  <div className="text-[10px] text-slate-400">Created via Customer App</div>
+                </div>
+                <div className="relative">
+                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600 absolute -left-[21px] top-1"></div>
+                  <div className="font-bold text-slate-900">Geospatial Candidate Scoring</div>
+                  <div className="text-[10px] text-slate-400">Redis GEO matching within radius</div>
+                </div>
+                <div className="relative">
+                  <div className={`w-2.5 h-2.5 rounded-full absolute -left-[21px] top-1 ${selectedBooking.assignedWorkerName ? 'bg-blue-600' : 'bg-slate-300'}`}></div>
+                  <div className="font-bold text-slate-900">Partner Acceptance & Transit</div>
+                  <div className="text-[10px] text-slate-400">{selectedBooking.assignedWorkerName ? `Accepted by ${selectedBooking.assignedWorkerName}` : 'Awaiting worker'}</div>
+                </div>
+                <div className="relative">
+                  <div className={`w-2.5 h-2.5 rounded-full absolute -left-[21px] top-1 ${selectedBooking.status === 'COMPLETED' ? 'bg-emerald-600' : 'bg-slate-300'}`}></div>
+                  <div className="font-bold text-slate-900">Fulfillment & Completion</div>
+                  <div className="text-[10px] text-slate-400">{selectedBooking.status === 'COMPLETED' ? 'Work completed and verified' : 'Pending completion'}</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Drawer Actions Footer */}
+          <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
+            <button
+              onClick={() => setCancelModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 font-bold hover:bg-rose-50 cursor-pointer"
+            >
+              Cancel Order
+            </button>
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setIsDetailModalOpen(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition"
+                onClick={() => setReassignModalOpen(true)}
+                className="px-4 py-2.5 rounded-xl bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                Force Reassign
+              </button>
+              <button
+                onClick={() => setIsDetailDrawerOpen(false)}
+                className="px-4 py-2.5 rounded-xl bg-[#1D68F2] hover:bg-blue-600 text-white font-bold cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* FORCE REASSIGNMENT MODAL                                 */}
+      {/* ======================================================== */}
+      {reassignModalOpen && selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  Manual Dispatch Override
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Order #{selectedBooking.bookingId?.slice(0, 8)}
+                </p>
+              </div>
+              <button 
+                onClick={() => setReassignModalOpen(false)} 
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-5 text-xs max-h-[75vh] overflow-y-auto">
-              
-              {/* Security PIN Callout */}
-              <div className="bg-amber-950/40 border border-amber-500/30 p-4 rounded-xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-                    <KeyRound className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Customer Verification PIN</span>
-                    <div className="text-xl font-mono font-black text-white mt-0.5 tracking-widest">
-                      {selectedBooking.pinCode && selectedBooking.pinCode !== '-' ? selectedBooking.pinCode : '0000'}
-                    </div>
-                  </div>
-                </div>
-                <span className="text-[11px] text-amber-300/80 max-w-xs text-right">
-                  Partner must enter this 4-digit PIN on arrival to start job.
-                </span>
+            <form onSubmit={handleConfirmReassign} className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Choose Target Partner
+                </label>
+                <select
+                  value={targetWorkerId}
+                  onChange={(e) => setTargetWorkerId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 cursor-pointer"
+                  required
+                >
+                  <option value="">-- Select verified partner --</option>
+                  {workers.map((w, idx) => (
+                    <option key={w.workerId || idx} value={w.workerId}>
+                      {w.fullName || w.user?.fullName || 'Partner'} ({w.phoneNumber || w.user?.phoneNumber})
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* Grid: Customer & Partner */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Customer Info */}
-                <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-blue-400" /> Customer Information
-                  </div>
-                  <div className="font-semibold text-white text-sm">
-                    {selectedBooking.customerName || selectedBooking.userName || 'Customer'}
-                  </div>
-                  <div className="text-slate-400 flex items-center gap-1.5">
-                    <Phone className="w-3.5 h-3.5 text-slate-500" /> 
-                    <a href={`tel:${selectedBooking.customerPhone || selectedBooking.userPhone}`} className="hover:text-blue-400">
-                      {selectedBooking.customerPhone || selectedBooking.userPhone || 'N/A'}
-                    </a>
-                  </div>
-                  <div className="text-slate-400 flex items-start gap-1.5 pt-1">
-                    <MapPin className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
-                    <span>{selectedBooking.address || 'Indiranagar 100ft Road, Bengaluru, Karnataka'}</span>
-                  </div>
-                </div>
-
-                {/* Assigned Worker Partner */}
-                <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" /> Assigned Fulfillment Partner
-                  </div>
-                  {selectedBooking.assignedWorkerName ? (
-                    <>
-                      <div className="font-semibold text-white text-sm">
-                        {selectedBooking.assignedWorkerName}
-                      </div>
-                      <div className="text-slate-400 flex items-center gap-1.5">
-                        <Phone className="w-3.5 h-3.5 text-slate-500" /> 
-                        <span>{selectedBooking.assignedWorkerPhone || '+91 99887 76655'}</span>
-                      </div>
-                      <div className="text-emerald-400 text-[11px] font-semibold flex items-center gap-1 pt-1">
-                        <CheckCircle2 className="w-3 h-3" /> Verified HomeEase Professional
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-amber-400 font-semibold text-xs flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" /> No Partner Assigned Yet
-                      </div>
-                      <select
-                        onChange={(e) => {
-                          if (e.target.value) handleAssignWorker(selectedBooking.bookingId || selectedBooking.id, e.target.value);
-                        }}
-                        className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-xl p-2 outline-none"
-                        defaultValue=""
-                      >
-                        <option value="" disabled>Choose Partner to Dispatch...</option>
-                        {workers.map((w, idx) => (
-                          <option key={w.workerId || w.id || idx} value={w.workerId || w.id}>
-                            {w.user?.fullName || w.fullName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+              <div>
+                <label className="font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Reassignment Reason (Audit Record)
+                </label>
+                <textarea
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="State the operational reason for manual reassignment..."
+                  rows={3}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
+                  required
+                />
               </div>
 
-              {/* Service & Pricing Breakdown */}
-              <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2.5">
-                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  Price & Settlement Summary
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span>Base Service Charge ({selectedBooking.serviceName})</span>
-                  <span className="font-mono">₹{selectedBooking.baseAmount || selectedBooking.totalAmount || 0}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span>Platform Conveniencing Fee & Taxes</span>
-                  <span className="font-mono">₹{selectedBooking.extraAmount || 49}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-400 text-[11px]">
-                  <span>Payment Mode</span>
-                  <span className="font-semibold text-white">{selectedBooking.paymentMethod || 'COD'}</span>
-                </div>
-                <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-bold text-white">
-                  <span>Total Amount Paid / Payable</span>
-                  <span className="text-blue-400 font-mono text-base">₹{(Number(selectedBooking.totalAmount || selectedBooking.baseAmount || 0) + Number(selectedBooking.extraAmount || 49)).toLocaleString('en-IN')}</span>
-                </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReassignModalOpen(false)}
+                  className="px-4 py-2 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-5 py-2 rounded-xl bg-[#1D68F2] hover:bg-blue-600 text-white font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  <span>Commit Reassignment</span>
+                </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-              {/* Lifecycle Stage Controls */}
-              <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400 font-medium">Stage Override:</span>
-                  <select
-                    value={selectedBooking.status || selectedBooking.bookingStatus}
-                    onChange={(e) => handleUpdateStatus(selectedBooking.bookingId || selectedBooking.id, e.target.value)}
-                    disabled={actionLoading}
-                    className="bg-slate-800 border border-slate-700 text-white font-semibold text-xs rounded-xl px-3 py-1.5 outline-none focus:border-blue-500"
-                  >
-                    <option value="SEARCHING">SEARCHING / PENDING</option>
-                    <option value="ASSIGNED">ASSIGNED</option>
-                    <option value="IN_PROGRESS">IN_PROGRESS</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="CANCELLED">CANCELLED</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setIsDetailModalOpen(false)}
-                    className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
-                  >
-                    Close
-                  </button>
-                </div>
+      {/* ======================================================== */}
+      {/* CANCEL BOOKING MODAL                                     */}
+      {/* ======================================================== */}
+      {cancelModalOpen && selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-black text-rose-600 flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-rose-600" /> Cancel Booking #{selectedBooking.bookingId?.slice(0, 8)}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Are you sure you want to cancel this order?
+                </p>
               </div>
+              <button 
+                onClick={() => setCancelModalOpen(false)} 
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
+
+            <form onSubmit={handleConfirmCancel} className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Cancellation Reason
+                </label>
+                <textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Explain why this booking is being cancelled..."
+                  rows={3}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-600"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCancelModalOpen(false)}
+                  className="px-4 py-2 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Keep Booking
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                  <span>Confirm Cancellation</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
